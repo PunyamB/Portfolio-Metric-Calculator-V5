@@ -1,6 +1,0 @@
-﻿Factor,Exposure,t-stat,Significant,Optimal Range,Interpretation
-Market,0.8648,14.93,Yes,0.8 to 1.2,Strong — Near market-neutral (~1.0)
-Size (Small-Big),0.4669,4.59,Yes,-0.5 to +0.5,Strong — Tilted toward small-caps
-Value (High-Low),-0.2056,-1.76,No,-0.5 to +0.5,Weak (not significant) — Growth tilt (expensive stocks)
-Profitability (Robust-Weak),0.0129,0.1,No,-0.3 to +0.3,Weak (not significant) — No profitability bias
-Investment (Conservative-Aggressive),0.3504,2.43,Yes,-0.3 to +0.3,Moderate — Conservative firms (low investment)
