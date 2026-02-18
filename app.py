@@ -121,7 +121,7 @@ The system reads `stocktrak_history.csv` as its single source of truth. On every
 
     st.markdown("### Portfolio Tab")
     st.markdown("""
-The holdings table displays each position with its current market price (fetched live from Yahoo Finance), cost basis, unrealised P&L, and portfolio weight. Positions are tagged as Long or Short based on share direction. Summary cards show Portfolio Value, Cash Remaining, Total Capital, and a three-way P&L breakdown — unrealised, realised, and total. Realised P&L is calculated using the average cost method: when shares are sold, the gain or loss is computed against the weighted average purchase price of all lots for that security.
+The holdings table displays each position with its current market price (fetched live from Yahoo Finance), cost basis, unrealised P&L, and portfolio weight. Positions are tagged as Long or Short based on share direction. Summary cards show Portfolio Value (net market value of all positions), Cash Balance (actual spendable cash excluding short collateral), Margin Held (cost basis of open short positions held as collateral), Total Account Value (sum of all three), and a three-way P&L breakdown — unrealised, realised, and total. Realised P&L is calculated using the average cost method: when shares are sold, the gain or loss is computed against the weighted average purchase price of all lots for that security.
 """)
 
     st.markdown("### Risk Metrics")
@@ -245,16 +245,14 @@ with tab_portfolio:
         total_combined = total_pnl + total_realised
 
         cap_result = calculate_current_capital(total_market_value)
-        if isinstance(cap_result, tuple):
-            auto_capital, cash_remaining = cap_result
-        else:
-            auto_capital, cash_remaining = cap_result, 0
+        auto_capital, cash_balance, margin_held = cap_result
 
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("Portfolio Value", f"${total_market_value:,.2f}")
-        c2.metric("Cash Remaining", f"${cash_remaining:,.2f}")
-        c3.metric("Total Capital", f"${auto_capital:,.2f}")
-        c4.metric("Positions", len(portfolio))
+        c2.metric("Cash Balance", f"${cash_balance:,.2f}")
+        c3.metric("Margin Held", f"${margin_held:,.2f}")
+        c4.metric("Total Account Value", f"${auto_capital:,.2f}")
+        c5.metric("Positions", len(portfolio))
 
         p1, p2, p3 = st.columns(3)
         p1.metric("Unrealised P&L", f"${total_pnl:,.2f}", delta=f"{total_pnl_pct:.2f}%")
@@ -704,7 +702,7 @@ with tab_simulator:
                         short_val += abs(mv)
                 except: pass
             cap_result = calculate_current_capital(tmv)
-            default_capital = int(cap_result[0]) if isinstance(cap_result, tuple) else int(cap_result)
+            default_capital = int(cap_result[0])
             default_capital += int(sim_proceeds)
             # compute current exposure percentages
             total_cap = default_capital if default_capital > 0 else 1
