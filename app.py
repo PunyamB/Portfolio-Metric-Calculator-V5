@@ -179,7 +179,7 @@ Step 4 uses mean-variance optimisation to find the mathematically optimal alloca
 - **Min Variance** finds the allocation with the lowest possible volatility.
 - **Unconstrained** runs with no long/short caps to show what the optimiser would do if constraints were removed.
 
-Five parameters control the optimisation: **Total Capital** (auto-calculated from the trade history plus any simulated proceeds, editable), **Max Long %** (the ceiling for total long exposure, default 73%), **Max Short %** (the ceiling for total short exposure, default 27%), **Max Per Position** (a dollar cap preventing any single position from dominating, default $90,000), and **Min Deploy %** (ensures at least this percentage of capital is allocated rather than sitting in cash, default 95%).
+Five parameters control the optimisation: **Total Capital** (auto-calculated from the trade history plus any simulated proceeds, editable), **Max Long %** (the ceiling for total long exposure, auto-filled from current portfolio allocation), **Max Short %** (the ceiling for total short exposure, auto-filled from current portfolio allocation), **Max Per Position** (a dollar cap preventing any single position from dominating, default $90,000), and **Min Deploy %** (ensures at least this percentage of capital is allocated rather than sitting in cash, default 95%).
 
 The long and short percentages are maximum caps, not targets — the optimiser can use less on either side if the math doesn't justify filling the allocation. This reflects how real portfolio managers operate: they set risk limits but deploy capital based on opportunity.
 
@@ -514,26 +514,36 @@ with tab_simulator:
                 hypo_ticker = hypo_ticker.upper().strip()
                 if hypo_shares == 0: st.error("Shares cannot be zero.")
                 else:
+                    # try Yahoo validation, fall back to manual price
+                    live_price = None
                     try:
-                        _ = yf.Ticker(hypo_ticker).fast_info.last_price
-                        existing = [h for h in st.session_state["sim_hypothetical"] if h["ticker"] == hypo_ticker]
-                        if existing:
-                            idx = st.session_state["sim_hypothetical"].index(existing[0])
-                            old = existing[0]
-                            ns = old["shares"] + hypo_shares
-                            if ns == 0: st.session_state["sim_hypothetical"].pop(idx)
-                            else:
-                                tc = abs(old["shares"]) * old["avg_buy_price"] + abs(hypo_shares) * hypo_price
-                                tq = abs(old["shares"]) + abs(hypo_shares)
-                                st.session_state["sim_hypothetical"][idx] = {
-                                    "ticker": hypo_ticker, "shares": ns,
-                                    "avg_buy_price": round(tc/tq, 4), "date_added": old["date_added"]}
+                        lp = yf.Ticker(hypo_ticker).fast_info.last_price
+                        if lp and lp > 0:
+                            live_price = round(lp, 2)
+                    except:
+                        pass
+
+                    use_price = live_price if live_price else hypo_price
+                    if not live_price:
+                        st.warning(f"Could not fetch live price for '{hypo_ticker}'. Using manual price ${hypo_price:,.2f}.")
+
+                    existing = [h for h in st.session_state["sim_hypothetical"] if h["ticker"] == hypo_ticker]
+                    if existing:
+                        idx = st.session_state["sim_hypothetical"].index(existing[0])
+                        old = existing[0]
+                        ns = old["shares"] + hypo_shares
+                        if ns == 0: st.session_state["sim_hypothetical"].pop(idx)
                         else:
-                            st.session_state["sim_hypothetical"].append({
-                                "ticker": hypo_ticker, "shares": hypo_shares,
-                                "avg_buy_price": hypo_price, "date_added": "hypothetical"})
-                        st.rerun()
-                    except: st.error(f"Could not validate '{hypo_ticker}'.")
+                            tc = abs(old["shares"]) * old["avg_buy_price"] + abs(hypo_shares) * use_price
+                            tq = abs(old["shares"]) + abs(hypo_shares)
+                            st.session_state["sim_hypothetical"][idx] = {
+                                "ticker": hypo_ticker, "shares": ns,
+                                "avg_buy_price": round(tc/tq, 4), "date_added": old["date_added"]}
+                    else:
+                        st.session_state["sim_hypothetical"].append({
+                            "ticker": hypo_ticker, "shares": hypo_shares,
+                            "avg_buy_price": use_price, "date_added": "hypothetical"})
+                    st.rerun()
 
         if st.session_state["sim_hypothetical"]:
             st.markdown("**Hypothetical positions:**")
@@ -676,24 +686,37 @@ with tab_simulator:
 
         # auto-calculate capital (includes simulated proceeds from Step 2)
         sim_proceeds = st.session_state.get("sim_proceeds", 0.0)
+        default_long_pct = 73
+        default_short_pct = 27
         if not portfolio.empty:
             tmv = 0
+            long_val = 0
+            short_val = 0
             for t in portfolio["ticker"].tolist():
                 try:
                     p = yf.Ticker(t).fast_info.last_price
                     s = portfolio.loc[portfolio["ticker"] == t, "shares"].iloc[0]
-                    tmv += p * s
+                    mv = p * s
+                    tmv += mv
+                    if s > 0:
+                        long_val += mv
+                    else:
+                        short_val += abs(mv)
                 except: pass
             cap_result = calculate_current_capital(tmv)
             default_capital = int(cap_result[0]) if isinstance(cap_result, tuple) else int(cap_result)
             default_capital += int(sim_proceeds)
+            # compute current exposure percentages
+            total_cap = default_capital if default_capital > 0 else 1
+            default_long_pct = min(100, round(long_val / total_cap * 100))
+            default_short_pct = min(100, round(short_val / total_cap * 100))
         else:
             default_capital = 1_000_000
 
         opt_c1, opt_c2, opt_c3, opt_c4, opt_c5 = st.columns(5)
         with opt_c1: opt_capital = st.number_input("Total Capital ($)", value=default_capital, step=10000, key="opt_capital")
-        with opt_c2: opt_long_pct = st.number_input("Max Long %", value=73, min_value=0, max_value=100, step=1, key="opt_long_pct")
-        with opt_c3: opt_short_pct = st.number_input("Max Short %", value=27, min_value=0, max_value=100, step=1, key="opt_short_pct")
+        with opt_c2: opt_long_pct = st.number_input("Max Long %", value=default_long_pct, min_value=0, max_value=100, step=1, key="opt_long_pct")
+        with opt_c3: opt_short_pct = st.number_input("Max Short %", value=default_short_pct, min_value=0, max_value=100, step=1, key="opt_short_pct")
         with opt_c4: opt_max_pos = st.number_input("Max Per Position ($)", value=90000, step=5000, key="opt_max_pos")
         with opt_c5: opt_min_deploy = st.number_input("Min Deploy %", value=95, min_value=50, max_value=100, step=1, key="opt_min_deploy")
 
