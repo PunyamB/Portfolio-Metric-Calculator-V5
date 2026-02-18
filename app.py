@@ -116,81 +116,81 @@ with tab_overview:
 
     st.markdown("### Data Pipeline")
     st.markdown("""
-I built the system to read `stocktrak_history.csv` as its single source of truth. On every page load, the raw CSV is parsed, cleaned, and transformed into a live portfolio. Transaction types like "Market - Buy", "Limit - Sell", "Short Proceeds", and "Buy to Cover" are all normalised into three standard actions: Buy, Sell, and Short. I exclude dividend rows since Yahoo Finance's adjusted prices already account for dividend returns in my metric calculations. Prices and amounts are stripped of accounting notation (dollar signs, commas, parentheses) and quantities are converted to absolute values with direction inferred from the transaction type. Multiple lots of the same security are merged into weighted average positions.
+The system reads `stocktrak_history.csv` as its single source of truth. On every page load, the raw CSV is parsed, cleaned, and transformed into a live portfolio. Transaction types like "Market - Buy", "Limit - Sell", "Short Proceeds", and "Buy to Cover" are all normalised into three standard actions: Buy, Sell, and Short. Dividend rows are excluded since Yahoo Finance's adjusted prices already account for dividend returns in metric calculations. Prices and amounts are stripped of accounting notation (dollar signs, commas, parentheses) and quantities are converted to absolute values with direction inferred from the transaction type. Multiple lots of the same security are merged into weighted average positions.
 """)
 
     st.markdown("### Portfolio Tab")
     st.markdown("""
-The holdings table displays each position with its current market price (fetched live from Yahoo Finance), cost basis, unrealised P&L, and portfolio weight. Positions are tagged as Long or Short based on share direction. I've included summary cards showing Portfolio Value, Cash Remaining, Total Capital, and a three-way P&L breakdown — unrealised, realised, and total. I calculate realised P&L using the average cost method: when shares are sold, the gain or loss is computed against the weighted average purchase price of all lots for that security.
+The holdings table displays each position with its current market price (fetched live from Yahoo Finance), cost basis, unrealised P&L, and portfolio weight. Positions are tagged as Long or Short based on share direction. Summary cards show Portfolio Value, Cash Remaining, Total Capital, and a three-way P&L breakdown — unrealised, realised, and total. Realised P&L is calculated using the average cost method: when shares are sold, the gain or loss is computed against the weighted average purchase price of all lots for that security.
 """)
 
     st.markdown("### Risk Metrics")
     st.markdown("""
-I compute fourteen metrics across the portfolio using historical daily returns and organise them into logical groupings.
+Fourteen metrics are computed across the portfolio using historical daily returns, organised into logical groupings.
 
-**Return & Growth** — CAGR, Max Drawdown, Calmar Ratio, and Turnover Ratio. These tell me how the portfolio has grown, how bad the worst decline was, and how actively I'm trading.
+**Return & Growth** — CAGR, Max Drawdown, Calmar Ratio, and Turnover Ratio. These show how the portfolio has grown, how bad the worst decline was, and how actively it is being traded.
 
 **Volatility & Distribution** — Daily and annualised standard deviation, variance, and skewness. These describe how much the portfolio moves and whether those movements are symmetric.
 
-**Risk Measures** — Kurtosis (tail risk), Value at Risk at 95% confidence (the worst daily loss I'd expect 19 out of 20 days), Conditional VaR (the average loss on those bad days), and Beta (sensitivity to the S&P 500).
+**Risk Measures** — Kurtosis (tail risk), Value at Risk at 95% confidence (the worst daily loss expected 19 out of 20 days), Conditional VaR (the average loss on those bad days), and Beta (sensitivity to the S&P 500).
 
 **Performance Ratios** — Sharpe (excess return per unit of total risk), Sortino (excess return per unit of downside risk only), and annualised Alpha (return above what Beta alone would predict).
 
 **Daily Values** — Non-annualised Sharpe and Alpha for direct comparison with StockTrak's reported figures.
 
-**Since Inception** — Sharpe and Alpha computed from the portfolio's start date of January 26, 2026, regardless of the lookback period selected. This gives me a consistent performance anchor across all time horizons.
+**Since Inception** — Sharpe and Alpha computed from the portfolio's start date of January 26, 2026, regardless of the lookback period selected. This provides a consistent performance anchor across all time horizons.
 
-All metrics use the 13-week US Treasury Bill rate as the risk-free rate, fetched live. I use the S&P 500 as the benchmark. Lookback periods of 1, 3, 5, 10, or 15 years determine how much historical price data is used.
+All metrics use the 13-week US Treasury Bill rate as the risk-free rate, fetched live. The S&P 500 serves as the benchmark. Lookback periods of 1, 3, 5, 10, or 15 years determine how much historical price data is used.
 """)
 
     st.markdown("### Fama-French 5-Factor Analysis")
     st.markdown("""
-Beyond simple Beta, I run a full regression against the Fama-French five-factor model. This decomposes my portfolio returns into exposure to five systematic risk factors: Market (overall equity risk), Size (small vs large cap tilt), Value (cheap vs expensive stocks), Profitability (strong vs weak earnings), and Investment (conservative vs aggressive capital spending). Each factor shows its exposure coefficient, t-statistic, statistical significance, an optimal range for diversified portfolios, and a plain-English interpretation. The R-squared tells me what percentage of my portfolio returns are explained by these five factors — anything left over is idiosyncratic risk specific to my stock picks.
+Beyond simple Beta, a full regression is run against the Fama-French five-factor model. This decomposes portfolio returns into exposure to five systematic risk factors: Market (overall equity risk), Size (small vs large cap tilt), Value (cheap vs expensive stocks), Profitability (strong vs weak earnings), and Investment (conservative vs aggressive capital spending). Each factor shows its exposure coefficient, t-statistic, statistical significance, an optimal range for diversified portfolios, and a plain-English interpretation. The R-squared indicates what percentage of portfolio returns are explained by these five factors — anything left over is idiosyncratic risk specific to the stock picks.
 """)
 
     st.markdown("### Contribution to Risk")
     st.markdown("""
-This analysis answers the question "which of my positions are adding the most risk to the portfolio?" Using the covariance matrix of daily returns, I calculate each position's marginal contribution to total portfolio volatility. A position with high CTR relative to its weight is contributing disproportionate risk — it might be worth trimming. A position with low CTR relative to its weight is a diversifier.
+This analysis answers the question "which positions are adding the most risk to the portfolio?" Using the covariance matrix of daily returns, each position's marginal contribution to total portfolio volatility is calculated. A position with high CTR relative to its weight is contributing disproportionate risk — it might be worth trimming. A position with low CTR relative to its weight is a diversifier.
 """)
 
     st.markdown("### Reports")
     st.markdown("""
-I built a report generator that lets me pick any two dates and produces a professional portfolio analysis comparing performance between them. The system reconstructs what I held on each date by replaying the CSV trade history, fetches historical prices from Yahoo Finance, and computes all metric deltas. Per-stock P&L attribution handles mid-period trades correctly — if I bought a stock on Wednesday, the return is calculated from my buy price to the end date, not from the start date. The narrative commentary is generated by Google's Gemini AI using the structured data as input. The output is a downloadable DOCX report with performance snapshot, top movers, risk profile changes, factor exposures, and forward outlook.
+The report generator allows selection of any two dates and produces a professional portfolio analysis comparing performance between them. The system reconstructs holdings on each date by replaying the CSV trade history, fetches historical prices from Yahoo Finance, and computes all metric deltas. Per-stock P&L attribution handles mid-period trades correctly — if a stock was bought on Wednesday, the return is calculated from the buy price to the end date, not from the start date. Narrative commentary is generated by Google's Gemini AI using the structured data as input. The output is a downloadable DOCX report with performance snapshot, top movers, risk profile changes, factor exposures, and forward outlook.
 """)
 
     st.markdown("### Trade History")
 
     st.markdown("### What-If Simulator")
     st.markdown("""
-I built the simulator to let me construct hypothetical portfolios and compare their risk profiles against my current holdings without making any actual trades.
+The simulator allows construction of hypothetical portfolios and comparison of their risk profiles against current holdings without making any actual trades.
 
-**Step 1** — I select which existing positions to keep by toggling checkboxes.
+**Step 1** — Existing positions are selected for inclusion by toggling checkboxes.
 
-**Step 2** — I add hypothetical positions. Positive shares for new longs, negative shares for simulated sells or new shorts. When I simulate selling an existing position or opening a new short, the system calculates the cash proceeds at current market prices and displays them. These proceeds flow into Step 4's optimiser as additional available capital.
+**Step 2** — Hypothetical positions are added. Positive shares for new longs, negative shares for simulated sells or new shorts. When a simulated sell or new short is entered, the system calculates the cash proceeds at current market prices and displays them. These proceeds flow into Step 4's optimiser as additional available capital.
 
-**Step 3** — A side-by-side metric comparison between my current portfolio and the simulated one. Every metric is shown with a delta and colour-coded — green for improvement, red for deterioration. The simulation uses the same price data and lookback period for both portfolios to ensure an apples-to-apples comparison. I intentionally designed simulated cash from hypothetical sells to not affect Step 3's metrics because in practice, uninvested cash earns the risk-free rate and has zero volatility — it would only dilute the metrics without adding information.
+**Step 3** — A side-by-side metric comparison between the current portfolio and the simulated one. Every metric is shown with a delta and colour-coded — green for improvement, red for deterioration. The simulation uses the same price data and lookback period for both portfolios to ensure an apples-to-apples comparison. Simulated cash from hypothetical sells does not affect Step 3's metrics because in practice, uninvested cash earns the risk-free rate and has zero volatility — it would only dilute the metrics without adding information.
 """)
 
     st.markdown("### Markowitz Portfolio Optimization")
     st.markdown("""
-Step 4 uses mean-variance optimisation to find the mathematically optimal allocation across my selected tickers. I run three scenarios:
+Step 4 uses mean-variance optimisation to find the mathematically optimal allocation across the selected tickers. Three scenarios are run:
 
 - **Max Sharpe** finds the allocation with the highest risk-adjusted return.
 - **Min Variance** finds the allocation with the lowest possible volatility.
-- **Unconstrained** runs with no long/short caps to show what the optimiser would do if my constraints were removed.
+- **Unconstrained** runs with no long/short caps to show what the optimiser would do if constraints were removed.
 
-Five parameters control the optimisation: **Total Capital** (auto-calculated from my trade history plus any simulated proceeds, editable), **Max Long %** (the ceiling for total long exposure, default 73%), **Max Short %** (the ceiling for total short exposure, default 27%), **Max Per Position** (a dollar cap preventing any single position from dominating, default $90,000), and **Min Deploy %** (ensures at least this percentage of capital is allocated rather than sitting in cash, default 95%).
+Five parameters control the optimisation: **Total Capital** (auto-calculated from the trade history plus any simulated proceeds, editable), **Max Long %** (the ceiling for total long exposure, default 73%), **Max Short %** (the ceiling for total short exposure, default 27%), **Max Per Position** (a dollar cap preventing any single position from dominating, default $90,000), and **Min Deploy %** (ensures at least this percentage of capital is allocated rather than sitting in cash, default 95%).
 
 The long and short percentages are maximum caps, not targets — the optimiser can use less on either side if the math doesn't justify filling the allocation. This reflects how real portfolio managers operate: they set risk limits but deploy capital based on opportunity.
 
-Each ticker is tagged as Long or Short with defaults inferred from my current portfolio positions. The efficient frontier chart plots 10,000 randomly generated portfolios colour-coded by Sharpe ratio, with the three optimal points and my current portfolio marked.
+Each ticker is tagged as Long or Short with defaults inferred from current portfolio positions. The efficient frontier chart plots 10,000 randomly generated portfolios colour-coded by Sharpe ratio, with the three optimal points and the current portfolio marked.
 
-A **Constraint Analysis** box appears after results — if the unconstrained optimal would prefer a different long/short split than my caps allow, it shows as a blue info box with the Sharpe gap. If my constraints aren't binding, it shows as a green success box. The metrics comparison table adds the unconstrained column so I can see exactly what relaxing my limits would gain or cost. Three allocation tables show the recommended share counts, dollar amounts, and weights for each scenario, with a CASH row when the optimiser doesn't fully deploy capital.
+A **Constraint Analysis** box appears after results — if the unconstrained optimal would prefer a different long/short split than the caps allow, it shows as a blue info box with the Sharpe gap. If constraints aren't binding, it shows as a green success box. The metrics comparison table adds the unconstrained column for visibility into what relaxing limits would gain or cost. Three allocation tables show the recommended share counts, dollar amounts, and weights for each scenario, with a CASH row when the optimiser doesn't fully deploy capital.
 """)
 
     st.markdown("### Technical Architecture")
     st.markdown("""
-I built the system with Python and Streamlit, using three modules: `portfolio.py` handles CSV parsing, position computation, P&L tracking, and capital calculation. `metrics.py` contains all financial calculations — individual metrics, factor regression, contribution to risk, and the Markowitz optimiser using SciPy's SLSQP solver. `app.py` is the Streamlit interface that ties everything together. Market data comes from Yahoo Finance via the yfinance library, factor data from Kenneth French's data library, and interactive charts from Plotly.
+The system is built with Python and Streamlit, using three modules: `portfolio.py` handles CSV parsing, position computation, P&L tracking, and capital calculation. `metrics.py` contains all financial calculations — individual metrics, factor regression, contribution to risk, and the Markowitz optimiser using SciPy's SLSQP solver. `app.py` is the Streamlit interface that ties everything together. Market data comes from Yahoo Finance via the yfinance library, factor data from Kenneth French's data library, and interactive charts from Plotly.
 """)
 
 
