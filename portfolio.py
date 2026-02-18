@@ -27,24 +27,34 @@ def load_stocktrak_csv():
 
     df["Price"] = df["Price"].apply(clean_money)
 
+    # save raw quantity sign before abs() for Short Proceeds detection
+    df["_raw_qty"] = df["Quantity"].apply(lambda x: float(x) if pd.notna(x) else 0)
+
     # clean Quantity: always positive
     df["Quantity"] = df["Quantity"].apply(lambda x: abs(float(x)) if pd.notna(x) else 0)
 
     # parse TransactionType
-    def parse_txn_type(val):
+    # Short Proceeds with negative raw qty = opening a short position
+    # Short Proceeds with positive raw qty = settlement when covering (skip — Market - Cover handles it)
+    def parse_txn_type(row):
+        val = row["TransactionType"]
         if pd.isna(val): return None
         s = str(val).lower()
-        if "dividend" in s: return None  # skip dividends
-        if "short" in s: return "Short"
+        if "dividend" in s: return None
+        if "short" in s:
+            # positive raw qty means this is the proceeds reversal on cover — skip it
+            if row["_raw_qty"] > 0:
+                return None
+            return "Short"
         if "cover" in s: return "Buy"  # buy to cover
         if "buy" in s: return "Buy"
         if "sell" in s: return "Sell"
         return None
 
-    df["_parsed_type"] = df["TransactionType"].apply(parse_txn_type)
+    df["_parsed_type"] = df.apply(parse_txn_type, axis=1)
     df = df[df["_parsed_type"].notna()].copy()
     df["TransactionType"] = df["_parsed_type"]
-    df.drop(columns=["_parsed_type"], inplace=True)
+    df.drop(columns=["_parsed_type", "_raw_qty"], inplace=True, errors="ignore")
 
     # parse CreateDate: "02/11/2026 - 10:29" -> date only
     def parse_date(val):
@@ -87,7 +97,7 @@ def compute_portfolio_from_trades():
     for _, row in trades_sorted.iterrows():
         symbol = str(row["Symbol"]).upper().strip()
         txn_type = row["TransactionType"]
-        qty = float(row["Quantity"])
+        qty = abs(float(row["Quantity"]))
         price = float(row["Price"])
         trade_date = row.get("CreateDate", None)
 
@@ -155,7 +165,7 @@ def compute_realised_pnl():
     for _, row in trades_sorted.iterrows():
         symbol = str(row["Symbol"]).upper().strip()
         txn_type = row["TransactionType"]
-        qty = float(row["Quantity"])
+        qty = abs(float(row["Quantity"]))
         price = float(row["Price"])
 
         if symbol not in positions:
