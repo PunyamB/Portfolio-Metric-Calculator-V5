@@ -841,6 +841,32 @@ with tab_simulator:
 
                 # allocation tables — 3 columns
                 st.divider()
+
+                # detect zeroed-out positions
+                all_input_tickers = set(opt_long_list + opt_short_list)
+                def _get_allocated(table):
+                    if table.empty: return set()
+                    return set(table[table["Ticker"] != "CASH"]["Ticker"].tolist())
+
+                ms_allocated = _get_allocated(ms["table"])
+                mv_allocated = _get_allocated(mv["table"])
+                uc_allocated = _get_allocated(uc["table"])
+
+                ms_zeroed = all_input_tickers - ms_allocated
+                mv_zeroed = all_input_tickers - mv_allocated
+                uc_zeroed = all_input_tickers - uc_allocated
+
+                all_zeroed = ms_zeroed | mv_zeroed | uc_zeroed
+                if all_zeroed:
+                    zeroed_notes = []
+                    for t in sorted(all_zeroed):
+                        scenarios = []
+                        if t in ms_zeroed: scenarios.append("Max Sharpe")
+                        if t in mv_zeroed: scenarios.append("Min Variance")
+                        if t in uc_zeroed: scenarios.append("Unconstrained")
+                        zeroed_notes.append(f"**{t}** → 0% in {', '.join(scenarios)}")
+                    st.warning("Some positions received zero allocation: " + " · ".join(zeroed_notes))
+
                 at1, at2, at3 = st.columns(3)
                 tbl_fmt = {"Dollar Amount ($)": "${:,.2f}", "Weight (%)": "{:.2f}"}
                 with at1:
