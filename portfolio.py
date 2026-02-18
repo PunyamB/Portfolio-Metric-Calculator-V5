@@ -221,26 +221,42 @@ def _clean_money_signed(val):
 
 
 def calculate_current_capital(portfolio_market_value):
+    """Calculate cash balance, margin held, and total account value.
+    
+    Returns: (total_account_value, cash_balance, margin_held)
+    
+    - cash_balance: Starting capital + Buy/Sell/Dividend cash flows only
+    - margin_held: Cost basis of open short positions (collateral)
+    - total_account_value: cash_balance + portfolio_market_value + margin_held
+    """
     if not os.path.exists(STOCKTRAK_FILE):
-        return STARTING_CAPITAL, STARTING_CAPITAL
+        return STARTING_CAPITAL, STARTING_CAPITAL, 0.0
 
     df = pd.read_csv(STOCKTRAK_FILE, encoding="utf-8-sig")
     df.columns = df.columns.str.strip()
 
     if "Amount" not in df.columns:
-        return STARTING_CAPITAL, STARTING_CAPITAL
+        return STARTING_CAPITAL, STARTING_CAPITAL, 0.0
 
-    # use StockTrak's Amount directly (already signed: negative=spent, positive=received)
-    # skip dividend rows for trade-based capital calc
+    # cash flow from regular trades only (Buy, Sell, Dividends)
+    # exclude Short Proceeds and Market - Cover rows
     if "TransactionType" in df.columns:
-        trade_rows = df[~df["TransactionType"].str.lower().str.contains("dividend", na=False)]
+        regular_rows = df[~df["TransactionType"].str.lower().str.contains("short|cover", na=False)]
     else:
-        trade_rows = df
+        regular_rows = df
 
-    total_cash_flow = trade_rows["Amount"].apply(_clean_money_signed).sum()
-    cash_remaining = STARTING_CAPITAL + total_cash_flow
-    total_capital = cash_remaining + portfolio_market_value
-    return round(total_capital, 2), round(cash_remaining, 2)
+    regular_cash_flow = regular_rows["Amount"].apply(_clean_money_signed).sum()
+    cash_balance = STARTING_CAPITAL + regular_cash_flow
+
+    # margin held = cost basis of open short positions
+    portfolio = compute_portfolio_from_trades()
+    margin_held = 0.0
+    for _, row in portfolio.iterrows():
+        if row["shares"] < 0:
+            margin_held += abs(row["shares"]) * row["avg_buy_price"]
+
+    total_account_value = cash_balance + portfolio_market_value + margin_held
+    return round(total_account_value, 2), round(cash_balance, 2), round(margin_held, 2)
 
 
 # --- public API ---
