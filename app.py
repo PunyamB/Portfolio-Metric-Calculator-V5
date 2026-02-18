@@ -721,7 +721,7 @@ with tab_simulator:
         with opt_c5: opt_min_deploy = st.number_input("Min Deploy %", value=95, min_value=50, max_value=100, step=1, key="opt_min_deploy")
 
         if opt_long_pct + opt_short_pct > 100:
-            st.warning(f"Max Long + Max Short = {opt_long_pct + opt_short_pct}%. Exceeds 100%.")
+            st.info(f"Note: Long + Short exposure = {opt_long_pct + opt_short_pct}%. This is expected for long-short portfolios using leverage.")
 
         all_opt_tickers = list(set(
             [t for t in selected_base] + [h["ticker"] for h in st.session_state.get("sim_hypothetical", [])]))
