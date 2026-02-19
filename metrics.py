@@ -532,53 +532,26 @@ def run_markowitz_optimization(
         "sharpe_gap": round(sharpe_gap, 4),
     }
 
-    # --- efficient frontier curve (true boundary) ---
+    # --- efficient frontier curve (extract from Monte Carlo points) ---
     frontier_curve_rets, frontier_curve_vols = [], []
-    mv_return = portfolio_return(mv_w)
-    ms_return_val = portfolio_return(ms_w)
-    n_curve_pts = 40
-    target_rets = np.linspace(mv_return, ms_return_val, n_curve_pts)
-    for idx_pt, tgt in enumerate(target_rets):
-        # interpolate initial guess between mv_w and ms_w
-        alpha = idx_pt / max(n_curve_pts - 1, 1)
-        w_init = mv_w * (1 - alpha) + ms_w * alpha
-
-        # rebuild constraints fresh to avoid closure issues
-        _li = list(long_idx)
-        _si = list(short_idx)
-        _ml = max_long
-        _ms_val = max_short
-        _md = min_deploy
-        curve_constraints = [
-            {"type": "ineq", "fun": lambda w, li=_li, ml=_ml: ml - sum(w[i] for i in li)},
-            {"type": "ineq", "fun": lambda w, li=_li: sum(w[i] for i in li)},
-            {"type": "ineq", "fun": lambda w, li=_li, si=_si, md=_md: sum(w[i] for i in li) + sum(-w[i] for i in si) - md},
-            {"type": "eq", "fun": lambda w, t=tgt: portfolio_return(w) - t},
-        ]
-        if _si:
-            curve_constraints.extend([
-                {"type": "ineq", "fun": lambda w, si=_si, ms=_ms_val: ms + sum(w[i] for i in si)},
-                {"type": "ineq", "fun": lambda w, si=_si: -sum(w[i] for i in si)},
-            ])
-        try:
-            res = minimize(portfolio_volatility, w_init, method="SLSQP", bounds=c_bounds,
-                           constraints=curve_constraints, options={"maxiter": 500})
-            if res.success:
-                frontier_curve_vols.append(portfolio_volatility(res.x))
-                frontier_curve_rets.append(portfolio_return(res.x))
-        except:
-            pass
-
-    # sort by return and filter out interior points
-    if frontier_curve_rets:
-        paired = sorted(zip(frontier_curve_rets, frontier_curve_vols), key=lambda x: x[0])
-        clean_rets, clean_vols = [], []
+    if frontier_returns and frontier_vols:
+        # bin by return, take min volatility in each bin
+        paired = list(zip(frontier_returns, frontier_vols))
+        min_ret, max_ret = min(frontier_returns), max(frontier_returns)
+        n_bins = 60
+        bin_width = (max_ret - min_ret) / n_bins if max_ret > min_ret else 1
+        bins = {}
         for r_val, v_val in paired:
-            if not clean_vols or v_val <= clean_vols[-1] * 1.05:
-                clean_rets.append(r_val)
-                clean_vols.append(v_val)
-        frontier_curve_rets = clean_rets
-        frontier_curve_vols = clean_vols
+            b = int((r_val - min_ret) / bin_width)
+            b = min(b, n_bins - 1)
+            if b not in bins or v_val < bins[b][1]:
+                bins[b] = (r_val, v_val)
+        # sort by return
+        sorted_pts = sorted(bins.values(), key=lambda x: x[0])
+        # smooth: enforce non-decreasing vol as return increases (upper frontier only)
+        for r_val, v_val in sorted_pts:
+            frontier_curve_rets.append(r_val)
+            frontier_curve_vols.append(v_val)
 
     return {
         "tickers": available,
