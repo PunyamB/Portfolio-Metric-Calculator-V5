@@ -532,6 +532,25 @@ def run_markowitz_optimization(
         "sharpe_gap": round(sharpe_gap, 4),
     }
 
+    # --- efficient frontier curve (true boundary) ---
+    frontier_curve_rets, frontier_curve_vols = [], []
+    mv_return = portfolio_return(mv_w)
+    ms_return_val = portfolio_return(ms_w)
+    n_curve_pts = 50
+    target_rets = np.linspace(mv_return, ms_return_val * 1.05, n_curve_pts)
+    for tgt in target_rets:
+        curve_constraints = list(c_constraints) + [
+            {"type": "eq", "fun": lambda w, t=tgt: portfolio_return(w) - t}
+        ]
+        try:
+            res = minimize(portfolio_volatility, ms_w, method="SLSQP", bounds=c_bounds,
+                           constraints=curve_constraints, options={"maxiter": 500})
+            if res.success:
+                frontier_curve_vols.append(portfolio_volatility(res.x))
+                frontier_curve_rets.append(portfolio_return(res.x))
+        except:
+            pass
+
     return {
         "tickers": available,
         "max_sharpe": {**ms_metrics, "table": build_alloc_table(ms_w), "weights": ms_w},
@@ -539,5 +558,115 @@ def run_markowitz_optimization(
         "unconstrained": {**uc_metrics, "table": build_alloc_table(uc_w), "weights": uc_w},
         "constraint_analysis": constraint_analysis,
         "frontier": {"returns": frontier_returns, "volatilities": frontier_vols, "sharpes": frontier_sharpes},
+        "frontier_curve": {"returns": frontier_curve_rets, "volatilities": frontier_curve_vols},
         "success": True,
     }
+
+
+def _run_custom_target_optimization(internals, mode="target_vol", target_value=0.15):
+    """Run optimizer for a custom volatility or return target.
+    mode: 'target_vol' (maximize return at given vol) or 'target_ret' (minimize vol at given return)
+    """
+    from scipy.optimize import minimize
+
+    prices = internals["prices"]
+    rf = internals["rf"]
+    long_tickers = internals["long_tickers"]
+    short_tickers = internals["short_tickers"]
+    total_capital = internals["total_capital"]
+    max_long_pct = internals["max_long_pct"]
+    max_short_pct = internals["max_short_pct"]
+    max_per_position = internals["max_per_position"]
+    min_deploy_pct = internals["min_deploy_pct"]
+
+    all_tickers = long_tickers + short_tickers
+    available = [t for t in all_tickers if t in prices.columns]
+    if len(available) < 2:
+        return {"error": "Need at least 2 tickers."}
+
+    daily_returns = prices[available].pct_change().dropna()
+    mean_returns = daily_returns.mean() * 252
+    cov_matrix = daily_returns.cov() * 252
+    n = len(available)
+    long_idx = [i for i, t in enumerate(available) if t in long_tickers]
+    short_idx = [i for i, t in enumerate(available) if t in short_tickers]
+
+    max_long = max_long_pct / 100
+    max_short = max_short_pct / 100
+    max_w = max_per_position / total_capital if total_capital > 0 else 0.1
+    min_deploy = min_deploy_pct / 100
+
+    def portfolio_return(w): return float(w @ mean_returns.values)
+    def portfolio_volatility(w): return float(np.sqrt(abs(w @ cov_matrix.values @ w)))
+
+    bounds = []
+    for i in range(n):
+        if i in long_idx: bounds.append((0.0, min(max_w, max_long)))
+        else: bounds.append((-min(max_w, max_short), 0.0))
+    bounds = tuple(bounds)
+
+    constraints = [
+        {"type": "ineq", "fun": lambda w: max_long - sum(w[i] for i in long_idx)},
+        {"type": "ineq", "fun": lambda w: sum(w[i] for i in long_idx)},
+        {"type": "ineq", "fun": lambda w: sum(w[i] for i in long_idx) + sum(-w[i] for i in short_idx) - min_deploy},
+    ]
+    if short_idx:
+        constraints.extend([
+            {"type": "ineq", "fun": lambda w: max_short + sum(w[i] for i in short_idx)},
+            {"type": "ineq", "fun": lambda w: -sum(w[i] for i in short_idx)},
+        ])
+
+    w0 = np.zeros(n)
+    il = min(max_long / max(len(long_idx), 1), max_w)
+    ish = min(max_short / max(len(short_idx), 1), max_w)
+    for i in long_idx: w0[i] = il
+    for i in short_idx: w0[i] = -ish
+
+    if mode == "target_vol":
+        # maximize return subject to vol <= target
+        constraints.append({"type": "ineq", "fun": lambda w: target_value - portfolio_volatility(w)})
+        def neg_return(w): return -portfolio_return(w)
+        result = minimize(neg_return, w0, method="SLSQP", bounds=bounds,
+                          constraints=constraints, options={"maxiter": 1000})
+    else:
+        # minimize vol subject to return >= target
+        constraints.append({"type": "ineq", "fun": lambda w: portfolio_return(w) - target_value})
+        result = minimize(portfolio_volatility, w0, method="SLSQP", bounds=bounds,
+                          constraints=constraints, options={"maxiter": 1000})
+
+    if not result.success:
+        return {"error": f"Optimizer did not converge. Try a different target. ({result.message})"}
+
+    w = result.x
+    ret = portfolio_return(w)
+    vol = portfolio_volatility(w)
+    sharpe = (ret - rf) / vol if vol > 0 else 0
+
+    # build allocation table
+    latest_prices = prices[available].iloc[-1]
+    rows = []
+    for i, t in enumerate(available):
+        wi = w[i]
+        if abs(wi) < 0.0001: continue
+        side = "Long" if t in long_tickers else "Short"
+        dollar_amt = abs(wi) * total_capital
+        price = latest_prices[t]
+        shares = int(dollar_amt / price) if price > 0 else 0
+        rows.append({"Ticker": t, "Side": side, "Weight (%)": round(wi * 100, 2),
+                     "Shares": shares if side == "Long" else -shares,
+                     "Dollar Amount ($)": round(dollar_amt, 2)})
+    table = pd.DataFrame(rows) if rows else pd.DataFrame()
+    if not table.empty:
+        allocated = table["Dollar Amount ($)"].sum()
+        cash = total_capital - allocated
+        if cash > 100:
+            cash_row = pd.DataFrame([{"Ticker": "CASH", "Side": "-",
+                "Weight (%)": round(cash / total_capital * 100, 2),
+                "Shares": "-", "Dollar Amount ($)": round(cash, 2)}])
+            table = pd.concat([table, cash_row], ignore_index=True)
+    else:
+        cash = total_capital
+
+    return {"return": round(ret, 4), "volatility": round(vol, 4),
+            "sharpe": round(sharpe, 4), "cash": round(cash, 2),
+            "table": table}
