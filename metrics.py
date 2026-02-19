@@ -569,6 +569,17 @@ def run_markowitz_optimization(
         except:
             pass
 
+    # sort by return and filter out interior points
+    if frontier_curve_rets:
+        paired = sorted(zip(frontier_curve_rets, frontier_curve_vols), key=lambda x: x[0])
+        clean_rets, clean_vols = [], []
+        for r_val, v_val in paired:
+            if not clean_vols or v_val <= clean_vols[-1] * 1.05:
+                clean_rets.append(r_val)
+                clean_vols.append(v_val)
+        frontier_curve_rets = clean_rets
+        frontier_curve_vols = clean_vols
+
     return {
         "tickers": available,
         "max_sharpe": {**ms_metrics, "table": build_alloc_table(ms_w), "weights": ms_w},
