@@ -535,23 +535,43 @@ def run_markowitz_optimization(
     # --- efficient frontier curve (extract from Monte Carlo points) ---
     frontier_curve_rets, frontier_curve_vols = [], []
     if frontier_returns and frontier_vols:
-        # bin by return, take min volatility in each bin
-        paired = list(zip(frontier_returns, frontier_vols))
-        min_ret, max_ret = min(frontier_returns), max(frontier_returns)
-        n_bins = 60
-        bin_width = (max_ret - min_ret) / n_bins if max_ret > min_ret else 1
-        bins = {}
-        for r_val, v_val in paired:
-            b = int((r_val - min_ret) / bin_width)
-            b = min(b, n_bins - 1)
-            if b not in bins or v_val < bins[b][1]:
-                bins[b] = (r_val, v_val)
-        # sort by return
-        sorted_pts = sorted(bins.values(), key=lambda x: x[0])
-        # smooth: enforce non-decreasing vol as return increases (upper frontier only)
-        for r_val, v_val in sorted_pts:
-            frontier_curve_rets.append(r_val)
-            frontier_curve_vols.append(v_val)
+        mv_ret_val = portfolio_return(mv_w)
+        mv_vol_val = portfolio_volatility(mv_w)
+        ms_ret_val = portfolio_return(ms_w)
+        ms_vol_val = portfolio_volatility(ms_w)
+
+        # only use points between min variance return and max sharpe return
+        paired = [(r, v) for r, v in zip(frontier_returns, frontier_vols)
+                  if mv_ret_val * 0.95 <= r <= ms_ret_val * 1.02]
+
+        if paired:
+            n_bins = 50
+            min_r = min(r for r, v in paired)
+            max_r = max(r for r, v in paired)
+            bin_width = (max_r - min_r) / n_bins if max_r > min_r else 1
+
+            # bin by return, keep min vol per bin
+            bins = {}
+            for r_val, v_val in paired:
+                b = min(int((r_val - min_r) / bin_width), n_bins - 1)
+                if b not in bins or v_val < bins[b][1]:
+                    bins[b] = (r_val, v_val)
+
+            sorted_pts = sorted(bins.values(), key=lambda x: x[0])
+
+            # add the actual optimized points as anchors
+            sorted_pts.insert(0, (mv_ret_val, mv_vol_val))
+            sorted_pts.append((ms_ret_val, ms_vol_val))
+            sorted_pts.sort(key=lambda x: x[0])
+
+            # walk forward: only keep points where vol doesn't spike
+            prev_vol = sorted_pts[0][1]
+            for r_val, v_val in sorted_pts:
+                # allow vol to increase but not more than 20% jump over previous
+                if v_val <= prev_vol * 1.2:
+                    frontier_curve_rets.append(r_val)
+                    frontier_curve_vols.append(v_val)
+                    prev_vol = v_val
 
     return {
         "tickers": available,
