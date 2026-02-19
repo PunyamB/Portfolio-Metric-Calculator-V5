@@ -532,46 +532,50 @@ def run_markowitz_optimization(
         "sharpe_gap": round(sharpe_gap, 4),
     }
 
-    # --- efficient frontier curve (extract from Monte Carlo points) ---
+    # --- efficient frontier curve (chained SLSQP, exact) ---
     frontier_curve_rets, frontier_curve_vols = [], []
-    if frontier_returns and frontier_vols:
-        mv_ret_val = portfolio_return(mv_w)
-        mv_vol_val = portfolio_volatility(mv_w)
-        ms_ret_val = portfolio_return(ms_w)
-        ms_vol_val = portfolio_volatility(ms_w)
+    mv_ret_val = portfolio_return(mv_w)
+    ms_ret_val = portfolio_return(ms_w)
+    n_curve_pts = 50
+    target_rets = np.linspace(mv_ret_val, ms_ret_val, n_curve_pts)
 
-        # only use points between min variance return and max sharpe return
-        paired = [(r, v) for r, v in zip(frontier_returns, frontier_vols)
-                  if mv_ret_val * 0.95 <= r <= ms_ret_val * 1.02]
+    # chain: start from mv_w, use each solution as next initial guess
+    prev_w = mv_w.copy()
+    _li = list(long_idx)
+    _si = list(short_idx)
+    _ml = float(max_long)
+    _ms_v = float(max_short)
+    _md = float(min_deploy)
 
-        if paired:
-            n_bins = 50
-            min_r = min(r for r, v in paired)
-            max_r = max(r for r, v in paired)
-            bin_width = (max_r - min_r) / n_bins if max_r > min_r else 1
+    for tgt in target_rets:
+        tgt_f = float(tgt)
+        def _vol(w):
+            return float(np.sqrt(abs(w @ cov_matrix.values @ w)))
+        def _ret(w):
+            return float(w @ mean_returns.values)
 
-            # bin by return, keep min vol per bin
-            bins = {}
-            for r_val, v_val in paired:
-                b = min(int((r_val - min_r) / bin_width), n_bins - 1)
-                if b not in bins or v_val < bins[b][1]:
-                    bins[b] = (r_val, v_val)
-
-            sorted_pts = sorted(bins.values(), key=lambda x: x[0])
-
-            # add the actual optimized points as anchors
-            sorted_pts.insert(0, (mv_ret_val, mv_vol_val))
-            sorted_pts.append((ms_ret_val, ms_vol_val))
-            sorted_pts.sort(key=lambda x: x[0])
-
-            # walk forward: only keep points where vol doesn't spike
-            prev_vol = sorted_pts[0][1]
-            for r_val, v_val in sorted_pts:
-                # allow vol to increase but not more than 20% jump over previous
-                if v_val <= prev_vol * 1.2:
-                    frontier_curve_rets.append(r_val)
-                    frontier_curve_vols.append(v_val)
-                    prev_vol = v_val
+        cur_constraints = [
+            {"type": "ineq", "fun": lambda w: _ml - sum(w[i] for i in _li)},
+            {"type": "ineq", "fun": lambda w: sum(w[i] for i in _li)},
+            {"type": "ineq", "fun": lambda w: sum(w[i] for i in _li) + sum(-w[i] for i in _si) - _md},
+            {"type": "eq", "fun": lambda w, t=tgt_f: _ret(w) - t},
+        ]
+        if _si:
+            cur_constraints.extend([
+                {"type": "ineq", "fun": lambda w: _ms_v + sum(w[i] for i in _si)},
+                {"type": "ineq", "fun": lambda w: -sum(w[i] for i in _si)},
+            ])
+        try:
+            res = minimize(_vol, prev_w, method="SLSQP", bounds=c_bounds,
+                           constraints=cur_constraints, options={"maxiter": 1000, "ftol": 1e-12})
+            if res.success:
+                v = _vol(res.x)
+                r = _ret(res.x)
+                frontier_curve_rets.append(r)
+                frontier_curve_vols.append(v)
+                prev_w = res.x.copy()
+        except:
+            pass
 
     return {
         "tickers": available,
