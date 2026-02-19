@@ -11,6 +11,7 @@ from metrics import (
     run_all_metrics, run_all_metrics_with_prices, fetch_price_history,
     get_risk_free_rate, compute_portfolio_returns, calculate_factor_exposures,
     calculate_ctr, run_markowitz_optimization, calculate_inception_metrics,
+    _run_custom_target_optimization,
 )
 import metrics as m
 
@@ -612,9 +613,9 @@ with tab_history:
 
         sm1, sm2, sm3, sm4, sm5 = st.columns(5)
         sm1.metric("Total Trades", len(filtered))
-        sm2.metric("Total Bought", f"${total_buys:,.2f}")
-        sm3.metric("Total Sold/Shorted", f"${total_sells:,.2f}")
-        sm4.metric("Net Flow", f"${total_buys - total_sells:,.2f}")
+        sm2.metric("Total Bought", f"${total_buys:,.0f}")
+        sm3.metric("Total Sold/Shorted", f"${total_sells:,.0f}")
+        sm4.metric("Net Flow", f"${total_buys - total_sells:,.0f}")
         sm5.metric("Realised P&L", f"${total_realised:,.2f}")
 
         show_cols = ["CreateDate", "Symbol", "CompanyName", "TransactionType",
@@ -1008,7 +1009,7 @@ with tab_simulator:
                 # --- Custom Target Allocation ---
                 st.markdown("**Custom Target Allocation**")
                 st.caption("Find the optimal allocation for a specific volatility or return target.")
-                ct1, ct2, ct3 = st.columns([1, 1, 1])
+                ct1, ct2 = st.columns(2)
                 with ct1:
                     target_vol = st.number_input("Target Volatility (%)", min_value=1.0, max_value=50.0,
                         value=round(cur_m["volatility"] * 100, 1), step=0.5, key="target_vol")
@@ -1017,29 +1018,17 @@ with tab_simulator:
                     target_ret = st.number_input("Target Return (%)", min_value=-20.0, max_value=200.0,
                         value=round(cur_m["return"] * 100, 1), step=1.0, key="target_ret")
                     find_ret = st.button("Find Min Volatility", key="find_ret_btn", use_container_width=True)
-                with ct3:
-                    st.caption("Slider: explore frontier")
-                    mv_ret = mv["return"] * 100
-                    ms_ret = ms["return"] * 100
-                    slider_ret = st.slider("Target Return (%)", min_value=round(mv_ret, 1),
-                        max_value=round(ms_ret * 1.1, 1), value=round((mv_ret + ms_ret) / 2, 1),
-                        step=0.5, key="slider_ret")
-                    find_slider = st.button("Find Allocation", key="find_slider_btn", use_container_width=True)
 
                 # run custom optimization
-                if (find_vol or find_ret or find_slider) and "_internals" in mk:
+                if (find_vol or find_ret) and "_internals" in mk:
                     internals = mk["_internals"]
-                    from metrics import _run_custom_target_optimization
                     with st.spinner("Finding optimal allocation..."):
                         if find_vol:
                             custom_result = _run_custom_target_optimization(
                                 internals, mode="target_vol", target_value=target_vol / 100)
-                        elif find_ret:
-                            custom_result = _run_custom_target_optimization(
-                                internals, mode="target_ret", target_value=target_ret / 100)
                         else:
                             custom_result = _run_custom_target_optimization(
-                                internals, mode="target_ret", target_value=slider_ret / 100)
+                                internals, mode="target_ret", target_value=target_ret / 100)
 
                     if custom_result and "error" not in custom_result:
                         st.session_state["custom_target_result"] = custom_result
