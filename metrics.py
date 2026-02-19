@@ -72,12 +72,15 @@ def fetch_fama_french_factors(years=None):
 # --- portfolio returns ---
 
 def compute_portfolio_returns(prices, holdings):
-    tickers = holdings["ticker"].tolist()
+    # aggregate duplicate tickers (e.g. base + hypothetical for same stock)
+    agg = holdings.groupby("ticker")["shares"].sum().reset_index()
+    agg = agg[agg["shares"].abs() > 0.0001]  # drop zeroed-out positions
+    tickers = agg["ticker"].tolist()
     available = [t for t in tickers if t in prices.columns]
     if not available:
         return pd.Series(dtype=float)
     price_subset = prices[available].dropna()
-    shares = holdings.set_index("ticker")["shares"][available]
+    shares = agg.set_index("ticker")["shares"][available]
     market_values = price_subset.multiply(shares, axis=1)
     total_value = market_values.sum(axis=1)
     mask = total_value.abs() > 0
