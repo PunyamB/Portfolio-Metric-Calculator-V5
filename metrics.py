@@ -467,6 +467,16 @@ def run_markowitz_optimization(
             raw = np.random.dirichlet(np.ones(len(short_idx))) * np.random.uniform(0.05, max_short)
             raw = np.minimum(raw, max_w)
             for j, idx in enumerate(short_idx): w[idx] = -raw[j]
+
+        # enforce min_deploy: scale up if underfunded
+        total_deploy = sum(w[i] for i in long_idx) + sum(-w[i] for i in short_idx)
+        if total_deploy < min_deploy and total_deploy > 0.01:
+            scale = min_deploy / total_deploy
+            w *= scale
+            # re-cap per-position limits after scaling
+            for i in long_idx: w[i] = min(w[i], max_w)
+            for i in short_idx: w[i] = max(w[i], -max_w)
+
         ret = portfolio_return(w)
         vol = portfolio_volatility(w)
         sharpe = (ret - rf) / vol if vol > 0 else 0
