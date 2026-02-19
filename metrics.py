@@ -536,14 +536,32 @@ def run_markowitz_optimization(
     frontier_curve_rets, frontier_curve_vols = [], []
     mv_return = portfolio_return(mv_w)
     ms_return_val = portfolio_return(ms_w)
-    n_curve_pts = 50
-    target_rets = np.linspace(mv_return, ms_return_val * 1.05, n_curve_pts)
-    for tgt in target_rets:
-        curve_constraints = list(c_constraints) + [
-            {"type": "eq", "fun": lambda w, t=tgt: portfolio_return(w) - t}
+    n_curve_pts = 40
+    target_rets = np.linspace(mv_return, ms_return_val, n_curve_pts)
+    for idx_pt, tgt in enumerate(target_rets):
+        # interpolate initial guess between mv_w and ms_w
+        alpha = idx_pt / max(n_curve_pts - 1, 1)
+        w_init = mv_w * (1 - alpha) + ms_w * alpha
+
+        # rebuild constraints fresh to avoid closure issues
+        _li = list(long_idx)
+        _si = list(short_idx)
+        _ml = max_long
+        _ms_val = max_short
+        _md = min_deploy
+        curve_constraints = [
+            {"type": "ineq", "fun": lambda w, li=_li, ml=_ml: ml - sum(w[i] for i in li)},
+            {"type": "ineq", "fun": lambda w, li=_li: sum(w[i] for i in li)},
+            {"type": "ineq", "fun": lambda w, li=_li, si=_si, md=_md: sum(w[i] for i in li) + sum(-w[i] for i in si) - md},
+            {"type": "eq", "fun": lambda w, t=tgt: portfolio_return(w) - t},
         ]
+        if _si:
+            curve_constraints.extend([
+                {"type": "ineq", "fun": lambda w, si=_si, ms=_ms_val: ms + sum(w[i] for i in si)},
+                {"type": "ineq", "fun": lambda w, si=_si: -sum(w[i] for i in si)},
+            ])
         try:
-            res = minimize(portfolio_volatility, ms_w, method="SLSQP", bounds=c_bounds,
+            res = minimize(portfolio_volatility, w_init, method="SLSQP", bounds=c_bounds,
                            constraints=curve_constraints, options={"maxiter": 500})
             if res.success:
                 frontier_curve_vols.append(portfolio_volatility(res.x))
