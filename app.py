@@ -587,8 +587,32 @@ with tab_simulator:
                 st.error("Need at least one position.")
             else:
                 base_rows = portfolio[portfolio["ticker"].isin(selected_base)].copy()
-                hypo_rows = pd.DataFrame(st.session_state["sim_hypothetical"]) if st.session_state["sim_hypothetical"] else pd.DataFrame()
-                sim_portfolio = pd.concat([base_rows, hypo_rows], ignore_index=True) if not hypo_rows.empty else base_rows.copy()
+                hypo_rows = st.session_state["sim_hypothetical"]
+
+                # merge hypothetical into base: subtract/add shares per ticker
+                sim_dict = {}
+                for _, row in base_rows.iterrows():
+                    sim_dict[row["ticker"]] = {
+                        "ticker": row["ticker"], "shares": row["shares"],
+                        "avg_buy_price": row["avg_buy_price"],
+                        "date_added": row.get("date_added", "")}
+
+                for h in hypo_rows:
+                    t = h["ticker"]
+                    if t in sim_dict:
+                        # existing position: adjust shares
+                        sim_dict[t]["shares"] += h["shares"]
+                        # if zeroed out, remove
+                        if abs(sim_dict[t]["shares"]) < 0.0001:
+                            del sim_dict[t]
+                    else:
+                        # new position
+                        sim_dict[t] = {
+                            "ticker": t, "shares": h["shares"],
+                            "avg_buy_price": h["avg_buy_price"],
+                            "date_added": h.get("date_added", "hypothetical")}
+
+                sim_portfolio = pd.DataFrame(list(sim_dict.values())) if sim_dict else pd.DataFrame(columns=["ticker", "shares", "avg_buy_price", "date_added"])
                 with st.spinner("Running simulation..."):
                     m.LOOKBACK_YEARS = {"1 Year": 1, "3 Years": 3, "5 Years": 5, "10 Years": 10, "15 Years": 15}[sim_lookback]
                     all_sim_tickers = list(set(portfolio["ticker"].tolist() + sim_portfolio["ticker"].tolist()))
