@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import yfinance as yf
+import plotly.graph_objects as go
+import plotly.express as px
 from portfolio import (
     get_portfolio, get_trade_history, compute_realised_pnl, calculate_current_capital,
 )
@@ -13,9 +15,77 @@ from metrics import (
 import metrics as m
 
 st.set_page_config(page_title="Paper Trading Dashboard", page_icon="📈", layout="wide")
+
+# === CUSTOM CSS THEME ===
 st.markdown("""<style>
+    /* Sidebar */
     section[data-testid="stSidebar"] > div:first-child { padding-top: 0.5rem; }
     [data-testid="stSidebarContent"] { padding-top: 0.5rem; }
+
+    /* Metric cards */
+    div[data-testid="stMetric"] {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border: 1px solid #2a2a4a;
+        border-radius: 10px;
+        padding: 12px 16px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    div[data-testid="stMetric"] label {
+        color: #8892b0 !important;
+        font-size: 0.8rem !important;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+        color: #e6f1ff !important;
+        font-weight: 600;
+    }
+
+    /* Tab styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background-color: #0a0a1a;
+        border-radius: 8px;
+        padding: 4px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 6px;
+        padding: 8px 20px;
+        color: #8892b0;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #1a1a2e !important;
+        color: #64ffda !important;
+    }
+
+    /* Dataframes */
+    .stDataFrame { border-radius: 8px; overflow: hidden; }
+
+    /* Headers */
+    h1, h2, h3 { color: #ccd6f6 !important; }
+
+    /* KPI strip */
+    .kpi-strip {
+        display: flex; justify-content: space-between; align-items: center;
+        background: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
+        border: 1px solid #30363d; border-radius: 10px;
+        padding: 10px 24px; margin-bottom: 16px;
+    }
+    .kpi-item { text-align: center; flex: 1; }
+    .kpi-label { color: #8b949e; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; }
+    .kpi-value { color: #e6edf3; font-size: 1.1rem; font-weight: 600; }
+    .kpi-value.positive { color: #3fb950; }
+    .kpi-value.negative { color: #f85149; }
+    .kpi-divider { width: 1px; height: 36px; background: #30363d; margin: 0 8px; }
+
+    /* Badge styles */
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; margin-left: 6px; }
+    .badge-good { background: #1a3a2a; color: #3fb950; border: 1px solid #238636; }
+    .badge-watch { background: #3a2a1a; color: #d29922; border: 1px solid #9e6a03; }
+    .badge-risk { background: #3a1a1a; color: #f85149; border: 1px solid #da3633; }
+
+    /* Divider */
+    hr { border-color: #21262d !important; }
 </style>""", unsafe_allow_html=True)
 
 st.title("Paper Trading Portfolio Dashboard")
@@ -23,7 +93,63 @@ st.caption("US Equities & ETFs | Benchmark: S&P 500 | Data: Yahoo Finance EOD | 
 
 portfolio = get_portfolio()
 
-# sidebar: info only
+
+# === HELPER: metric badge ===
+def metric_badge(value, good_fn, watch_fn=None):
+    """Return HTML badge: good/watch/risk based on value."""
+    if value is None or value == "N/A": return ""
+    try:
+        v = float(value) if not isinstance(value, (int, float)) else value
+    except: return ""
+    if good_fn(v): return '<span class="badge badge-good">Good</span>'
+    if watch_fn and watch_fn(v): return '<span class="badge badge-watch">Watch</span>'
+    return '<span class="badge badge-risk">Risk</span>'
+
+# badge rules for key metrics
+BADGE_RULES = {
+    "Sharpe Ratio": (lambda v: v > 1.0, lambda v: 0.5 <= v <= 1.0),
+    "Sortino Ratio": (lambda v: v > 1.5, lambda v: 0.75 <= v <= 1.5),
+    "Beta": (lambda v: 0.8 <= v <= 1.2, lambda v: 0.5 <= v <= 1.5),
+    "Max Drawdown": (lambda v: v > -0.10, lambda v: -0.20 <= v <= -0.10),
+    "Sharpe (Daily)": (lambda v: v > 0.05, lambda v: 0.02 <= v <= 0.05),
+    "Alpha (Annual)": (lambda v: v > 0.02, lambda v: 0.0 <= v <= 0.02),
+    "VaR (95%)": (lambda v: v > -0.02, lambda v: -0.03 <= v <= -0.02),
+    "CVaR (95%)": (lambda v: v > -0.03, lambda v: -0.04 <= v <= -0.03),
+    "Calmar Ratio": (lambda v: v > 1.0, lambda v: 0.5 <= v <= 1.0),
+    "CAGR": (lambda v: v > 0.10, lambda v: 0.0 <= v <= 0.10),
+}
+
+
+# === KPI STRIP (pre-compute values) ===
+if not portfolio.empty:
+    _kpi_prices = {}
+    for t in portfolio["ticker"].tolist():
+        try: _kpi_prices[t] = yf.Ticker(t).fast_info.last_price
+        except: _kpi_prices[t] = None
+
+    _kpi_mv = sum((s * (_kpi_prices.get(t) or 0)) for t, s in zip(portfolio["ticker"], portfolio["shares"]))
+    _kpi_cap_result = calculate_current_capital(_kpi_mv)
+    _kpi_total = _kpi_cap_result[0]
+    _kpi_pnl = _kpi_total - 1_000_000
+    _kpi_pnl_pct = (_kpi_pnl / 1_000_000) * 100
+    _kpi_long_count = len(portfolio[portfolio["shares"] > 0])
+    _kpi_short_count = len(portfolio[portfolio["shares"] < 0])
+
+    pnl_class = "positive" if _kpi_pnl >= 0 else "negative"
+    pnl_sign = "+" if _kpi_pnl >= 0 else ""
+
+    st.markdown(f"""<div class="kpi-strip">
+        <div class="kpi-item"><div class="kpi-label">Account Value</div><div class="kpi-value">${_kpi_total:,.0f}</div></div>
+        <div class="kpi-divider"></div>
+        <div class="kpi-item"><div class="kpi-label">Total P&L</div><div class="kpi-value {pnl_class}">{pnl_sign}${_kpi_pnl:,.0f} ({pnl_sign}{_kpi_pnl_pct:.2f}%)</div></div>
+        <div class="kpi-divider"></div>
+        <div class="kpi-item"><div class="kpi-label">Positions</div><div class="kpi-value">{len(portfolio)}</div></div>
+        <div class="kpi-divider"></div>
+        <div class="kpi-item"><div class="kpi-label">Long / Short</div><div class="kpi-value">{_kpi_long_count}L / {_kpi_short_count}S</div></div>
+    </div>""", unsafe_allow_html=True)
+
+
+# sidebar
 with st.sidebar:
     st.header("Dashboard Info")
     st.caption("Trade data loaded from `stocktrak_history.csv`.")
@@ -34,6 +160,7 @@ with st.sidebar:
         short_count = len(portfolio[portfolio["shares"] < 0])
         st.caption(f"Long: {long_count} | Short: {short_count}")
 
+
 # --- tabs ---
 tab_overview, tab_reports, tab_portfolio, tab_history, tab_simulator = st.tabs(["Overview", "Reports", "Portfolio", "Trade History", "What-If Simulator"])
 
@@ -43,7 +170,6 @@ with tab_reports:
     st.subheader("Portfolio Reports")
     st.caption("Select any two dates to generate a report comparing portfolio performance between them.")
 
-    # check for Gemini API key
     gemini_key = st.secrets.get("GEMINI_API_KEY", "")
     if not gemini_key:
         st.warning("Gemini API key not found. Add `GEMINI_API_KEY` to `.streamlit/secrets.toml` (local) or Streamlit Cloud Secrets.")
@@ -51,13 +177,10 @@ with tab_reports:
         st.success("Gemini API connected.")
 
     rc1, rc2, rc3 = st.columns([2, 2, 1])
-    with rc1:
-        report_start = st.date_input("Start Date", value=None, key="report_start_date")
-    with rc2:
-        report_end = st.date_input("End Date", value=None, key="report_end_date")
+    with rc1: report_start = st.date_input("Start Date", value=None, key="report_start_date")
+    with rc2: report_end = st.date_input("End Date", value=None, key="report_end_date")
     with rc3:
-        st.write("")
-        st.write("")
+        st.write(""); st.write("")
         gen_disabled = not gemini_key or report_start is None or report_end is None
         gen_clicked = st.button("Generate Report", type="primary", use_container_width=True, key="gen_report_btn", disabled=gen_disabled)
 
@@ -71,7 +194,6 @@ with tab_reports:
                     from report_narrative import generate_report_narrative
                     from report_gen import generate_report
                     import os
-
                     report_data = compute_report_data(report_start, report_end)
                     if "error" in report_data:
                         st.error(report_data["error"])
@@ -81,18 +203,15 @@ with tab_reports:
                         generate_report(report_data, narrative, output_path)
                         with open(output_path, "rb") as f:
                             st.download_button(
-                                label="Download Report",
-                                data=f.read(),
+                                label="Download Report", data=f.read(),
                                 file_name=f"portfolio_report_{report_data['period_start']}_to_{report_data['period_end']}.docx",
                                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                key="dl_report"
-                            )
+                                key="dl_report")
                         st.session_state["report_data"] = report_data
                         st.session_state["report_narrative"] = narrative
                 except Exception as e:
                     st.error(f"Report generation failed: {str(e)}")
 
-    # show preview if generated
     if "report_narrative" in st.session_state:
         with st.expander("Report Preview", expanded=True):
             n = st.session_state["report_narrative"]
@@ -126,7 +245,7 @@ The holdings table displays each position with its current market price (fetched
 
     st.markdown("### Risk Metrics")
     st.markdown("""
-Fourteen metrics are computed across the portfolio using historical daily returns, organised into logical groupings.
+Metrics are computed across the portfolio using historical daily returns, organised into logical groupings.
 
 **Return & Growth** — CAGR, Max Drawdown, Calmar Ratio, and Turnover Ratio. These show how the portfolio has grown, how bad the worst decline was, and how actively it is being traded.
 
@@ -200,10 +319,12 @@ with tab_portfolio:
     if portfolio.empty:
         st.info("No positions found. Make sure `stocktrak_history.csv` is in the app directory.")
     else:
-        latest_prices = {}
-        for t in portfolio["ticker"].tolist():
-            try: latest_prices[t] = round(yf.Ticker(t).fast_info.last_price, 2)
-            except: latest_prices[t] = None
+        # reuse KPI prices if available, otherwise fetch
+        latest_prices = _kpi_prices if '_kpi_prices' in dir() else {}
+        if not latest_prices:
+            for t in portfolio["ticker"].tolist():
+                try: latest_prices[t] = round(yf.Ticker(t).fast_info.last_price, 2)
+                except: latest_prices[t] = None
 
         display_df = portfolio.copy()
         display_df["Current Price ($)"] = display_df["ticker"].map(latest_prices)
@@ -223,19 +344,40 @@ with tab_portfolio:
         display_df = display_df.rename(columns={"ticker": "Ticker", "shares": "Shares",
                                                  "avg_buy_price": "Avg Price ($)", "date_added": "First Trade"})
 
-        # format prices with commas for display
+        # --- Treemap + Donut ---
+        viz1, viz2 = st.columns([3, 2])
+        with viz1:
+            st.markdown("**Position Map**")
+            tree_df = display_df[display_df["Current Price ($)"].notna()].copy()
+            tree_df["Abs MV"] = tree_df["Market Value ($)"].abs()
+            tree_df["Color"] = tree_df["P&L %"]
+            fig_tree = px.treemap(tree_df, path=["Ticker"], values="Abs MV", color="Color",
+                color_continuous_scale=["#f85149", "#21262d", "#3fb950"],
+                color_continuous_midpoint=0,
+                hover_data={"Market Value ($)": ":$,.2f", "P&L %": ":.2f", "Weight (%)": ":.1f"})
+            fig_tree.update_layout(margin=dict(t=10, l=10, r=10, b=10), height=320,
+                                   coloraxis_colorbar=dict(title="P&L %"))
+            st.plotly_chart(fig_tree, use_container_width=True)
+
+        with viz2:
+            st.markdown("**Weight Allocation**")
+            donut_df = display_df[display_df["Current Price ($)"].notna()].copy()
+            donut_df["Abs Weight"] = donut_df["Weight (%)"].abs()
+            fig_donut = px.pie(donut_df, values="Abs Weight", names="Ticker", hole=0.55)
+            fig_donut.update_layout(margin=dict(t=10, l=10, r=10, b=10), height=320,
+                                    showlegend=True, legend=dict(font=dict(size=10)))
+            fig_donut.update_traces(textposition="inside", textinfo="label+percent")
+            st.plotly_chart(fig_donut, use_container_width=True)
+
+        # Holdings table
         fmt_df = display_df[["Ticker", "Position", "Shares", "Avg Price ($)", "Current Price ($)",
                               "Market Value ($)", "Weight (%)", "Cost Basis ($)",
                               "Unrealised P&L ($)", "P&L %", "First Trade"]].copy()
 
         st.dataframe(fmt_df.style.format({
-            "Avg Price ($)": "${:,.2f}",
-            "Current Price ($)": "${:,.2f}",
-            "Market Value ($)": "${:,.2f}",
-            "Cost Basis ($)": "${:,.2f}",
-            "Unrealised P&L ($)": "${:,.2f}",
-            "Weight (%)": "{:.2f}",
-            "P&L %": "{:.2f}",
+            "Avg Price ($)": "${:,.2f}", "Current Price ($)": "${:,.2f}",
+            "Market Value ($)": "${:,.2f}", "Cost Basis ($)": "${:,.2f}",
+            "Unrealised P&L ($)": "${:,.2f}", "Weight (%)": "{:.2f}", "P&L %": "{:.2f}",
         }), use_container_width=True, hide_index=True)
 
         total_cost = display_df["Cost Basis ($)"].sum()
@@ -261,6 +403,31 @@ with tab_portfolio:
         combined_pct = (total_combined / total_cost * 100) if total_cost > 0 else 0
         p3.metric("Total P&L", f"${total_combined:,.2f}", delta=f"{combined_pct:.2f}%")
 
+        # --- Portfolio Value Time Series ---
+        st.divider()
+        st.markdown("**Portfolio Value vs S&P 500**")
+        pv_tickers = portfolio["ticker"].tolist()
+        pv_prices = fetch_price_history(pv_tickers + ["^GSPC"], years=1)
+        if not pv_prices.empty:
+            pv_shares = portfolio.set_index("ticker")["shares"]
+            # handle potential duplicate tickers
+            pv_shares = pv_shares.groupby(level=0).sum()
+            avail_t = [t for t in pv_shares.index if t in pv_prices.columns]
+            if avail_t:
+                pv_values = pv_prices[avail_t].multiply(pv_shares[avail_t], axis=1).sum(axis=1)
+                pv_norm = pv_values / pv_values.iloc[0] * 100
+                if "^GSPC" in pv_prices.columns:
+                    sp_norm = pv_prices["^GSPC"] / pv_prices["^GSPC"].iloc[0] * 100
+                    fig_pv = go.Figure()
+                    fig_pv.add_trace(go.Scatter(x=pv_norm.index, y=pv_norm.values,
+                        name="Portfolio", line=dict(color="#64ffda", width=2)))
+                    fig_pv.add_trace(go.Scatter(x=sp_norm.index, y=sp_norm.values,
+                        name="S&P 500", line=dict(color="#8892b0", width=1.5, dash="dot")))
+                    fig_pv.update_layout(yaxis_title="Indexed (100 = Start)", height=350,
+                        margin=dict(l=40, r=40, t=20, b=40), legend=dict(orientation="h", y=1.02),
+                        hovermode="x unified")
+                    st.plotly_chart(fig_pv, use_container_width=True)
+
         # --- sub-tabs ---
         st.divider()
         sub_metrics, sub_risk = st.tabs(["Metrics", "Risk Analysis"])
@@ -271,7 +438,7 @@ with tab_portfolio:
                 lookback = st.selectbox("Lookback Period",
                     ["1 Year", "3 Years", "5 Years", "10 Years", "15 Years"], index=1, key="pf_lookback")
             with col_btn:
-                lookback = lookback  # keep reference
+                lookback = lookback
             calc_clicked = col_btn.button("Calculate Metrics", type="primary", use_container_width=True, key="calc_pf")
             if calc_clicked:
                 with st.spinner("Fetching data and computing metrics..."):
@@ -301,62 +468,66 @@ with tab_portfolio:
                 r = st.session_state["portfolio_metrics"]
                 inc = st.session_state.get("inception_metrics", {})
 
+                def _metric_with_badge(label, value, tip, raw_val=None):
+                    """Display metric with optional badge."""
+                    badge_html = ""
+                    if label in BADGE_RULES and raw_val is not None:
+                        good_fn, watch_fn = BADGE_RULES[label]
+                        badge_html = metric_badge(raw_val, good_fn, watch_fn)
+                    if badge_html:
+                        st.metric(label=label, value=value, help=tip)
+                        st.markdown(badge_html, unsafe_allow_html=True)
+                    else:
+                        st.metric(label=label, value=value, help=tip)
+
                 # Row 1: Return & Growth
                 mc1 = st.columns(4)
-                for i, (label, value, tip) in enumerate([
-                    ("CAGR", f"{r.get('CAGR', 0)*100:.2f}%", "Compound annual growth"),
-                    ("Max Drawdown", f"{r.get('Max Drawdown', 0)*100:.2f}%", "Worst peak-to-trough"),
-                    ("Calmar Ratio", r.get("Calmar Ratio", "N/A"), "CAGR / Max Drawdown"),
-                    ("Turnover Ratio", r.get("Turnover Ratio", "N/A"), "From trade history"),
-                ]):
-                    with mc1[i]: st.metric(label=label, value=value, help=tip)
+                raw_cagr = r.get('CAGR', 0)
+                raw_dd = r.get('Max Drawdown', 0)
+                raw_calmar = r.get('Calmar Ratio', 0)
+                with mc1[0]: _metric_with_badge("CAGR", f"{raw_cagr*100:.2f}%", "Compound annual growth", raw_cagr)
+                with mc1[1]: _metric_with_badge("Max Drawdown", f"{raw_dd*100:.2f}%", "Worst peak-to-trough", raw_dd)
+                with mc1[2]: _metric_with_badge("Calmar Ratio", r.get("Calmar Ratio", "N/A"), "CAGR / Max Drawdown", raw_calmar)
+                with mc1[3]: st.metric("Turnover Ratio", r.get("Turnover Ratio", "N/A"), help="From trade history")
 
                 # Row 2: Volatility & Distribution
                 mc2 = st.columns(4)
-                for i, (label, value, tip) in enumerate([
-                    ("Variance (Daily)", r.get("Variance (Daily)", "N/A"), "Daily return variance"),
-                    ("Std Dev (Daily)", f"{r.get('Std Dev (Daily)', 0)*100:.4f}%", "Daily volatility"),
-                    ("Std Dev (Annual)", f"{r.get('Std Dev (Annual)', 0)*100:.2f}%", "Annualised volatility"),
-                    ("Skewness", r.get("Skewness", "N/A"), "Negative = left tail, Positive = right tail"),
-                ]):
-                    with mc2[i]: st.metric(label=label, value=value, help=tip)
+                with mc2[0]: st.metric("Variance (Daily)", r.get("Variance (Daily)", "N/A"), help="Daily return variance")
+                with mc2[1]: st.metric("Std Dev (Daily)", f"{r.get('Std Dev (Daily)', 0)*100:.4f}%", help="Daily volatility")
+                with mc2[2]: st.metric("Std Dev (Annual)", f"{r.get('Std Dev (Annual)', 0)*100:.2f}%", help="Annualised volatility")
+                with mc2[3]: st.metric("Skewness", r.get("Skewness", "N/A"), help="Negative = left tail, Positive = right tail")
 
                 # Row 3: Risk Measures
                 mc3 = st.columns(4)
-                for i, (label, value, tip) in enumerate([
-                    ("Kurtosis", r.get("Kurtosis", "N/A"), ">0 = fat tails"),
-                    ("VaR (95%)", f"{r.get('VaR (95%)', 0)*100:.2f}%", "Max daily loss at 95% confidence"),
-                    ("CVaR (95%)", f"{r.get('CVaR (95%)', 0)*100:.2f}%", "Avg loss beyond VaR"),
-                    ("Beta", r.get("Beta", "N/A"), "vs S&P 500"),
-                ]):
-                    with mc3[i]: st.metric(label=label, value=value, help=tip)
+                raw_var = r.get('VaR (95%)', 0)
+                raw_cvar = r.get('CVaR (95%)', 0)
+                raw_beta = r.get('Beta', 0)
+                with mc3[0]: st.metric("Kurtosis", r.get("Kurtosis", "N/A"), help=">0 = fat tails")
+                with mc3[1]: _metric_with_badge("VaR (95%)", f"{raw_var*100:.2f}%", "Max daily loss at 95% confidence", raw_var)
+                with mc3[2]: _metric_with_badge("CVaR (95%)", f"{raw_cvar*100:.2f}%", "Avg loss beyond VaR", raw_cvar)
+                with mc3[3]: _metric_with_badge("Beta", r.get("Beta", "N/A"), "vs S&P 500", raw_beta)
 
-                # Row 4: Performance Ratios (Annualised)
+                # Row 4: Performance Ratios
                 mc4 = st.columns(4)
-                for i, (label, value, tip) in enumerate([
-                    ("Sharpe Ratio", r.get("Sharpe Ratio", "N/A"), "Annualised excess return / volatility"),
-                    ("Sortino Ratio", r.get("Sortino Ratio", "N/A"), "Annualised excess return / downside vol"),
-                    ("Alpha (Annual)", f"{r.get('Alpha (Annual)', 0)*100:.2f}%", "Annualised excess return vs benchmark"),
-                ]):
-                    with mc4[i]: st.metric(label=label, value=value, help=tip)
+                raw_sharpe = r.get('Sharpe Ratio', 0)
+                raw_sortino = r.get('Sortino Ratio', 0)
+                raw_alpha = r.get('Alpha (Annual)', 0)
+                with mc4[0]: _metric_with_badge("Sharpe Ratio", r.get("Sharpe Ratio", "N/A"), "Annualised excess return / volatility", raw_sharpe)
+                with mc4[1]: _metric_with_badge("Sortino Ratio", r.get("Sortino Ratio", "N/A"), "Annualised excess return / downside vol", raw_sortino)
+                with mc4[2]: _metric_with_badge("Alpha (Annual)", f"{raw_alpha*100:.2f}%", "Annualised excess return vs benchmark", raw_alpha)
 
                 # Row 5: Daily Values
                 mc5 = st.columns(4)
-                for i, (label, value, tip) in enumerate([
-                    ("Sharpe (Daily)", r.get("Sharpe (Daily)", "N/A"), "Non-annualised daily Sharpe"),
-                    ("Alpha (Daily)", f"{r.get('Alpha (Daily)', 0)*100:.4f}%", "Non-annualised daily alpha"),
-                ]):
-                    with mc5[i]: st.metric(label=label, value=value, help=tip)
+                raw_sharpe_d = r.get('Sharpe (Daily)', 0)
+                with mc5[0]: _metric_with_badge("Sharpe (Daily)", r.get("Sharpe (Daily)", "N/A"), "Non-annualised daily Sharpe", raw_sharpe_d)
+                with mc5[1]: st.metric("Alpha (Daily)", f"{r.get('Alpha (Daily)', 0)*100:.4f}%", help="Non-annualised daily alpha")
 
                 # Row 6: Since Inception
                 if inc:
                     st.caption("Since Inception (Jan 26, 2026)")
                     mc6 = st.columns(4)
-                    for i, (label, value, tip) in enumerate([
-                        ("Sharpe (Inception)", inc.get("Sharpe (Inception)", "N/A"), "Sharpe since Jan 26, 2026"),
-                        ("Alpha (Inception)", f"{inc.get('Alpha (Inception)', 0)*100:.2f}%", "Alpha since Jan 26, 2026"),
-                    ]):
-                        with mc6[i]: st.metric(label=label, value=value, help=tip)
+                    with mc6[0]: st.metric("Sharpe (Inception)", inc.get("Sharpe (Inception)", "N/A"), help="Sharpe since Jan 26, 2026")
+                    with mc6[1]: st.metric("Alpha (Inception)", f"{inc.get('Alpha (Inception)', 0)*100:.2f}%", help="Alpha since Jan 26, 2026")
 
                 st.caption(f"Risk-free rate: {r.get('Risk-Free Rate Used', 0)*100:.2f}% (13-week T-Bill) | Lookback: {lookback}")
 
@@ -414,7 +585,7 @@ with tab_portfolio:
                         st.caption("Click 'Calculate CTR' to see risk contributions.")
 
 
-# === TAB 2: TRADE HISTORY (read-only) ===
+# === TAB 2: TRADE HISTORY ===
 with tab_history:
     st.subheader("Trade History")
     st.caption("Read-only. Data loaded from `stocktrak_history.csv`. To update, replace the file and refresh.")
@@ -451,14 +622,11 @@ with tab_history:
         available_cols = [c for c in show_cols if c in filtered.columns]
         show_df = filtered[available_cols].sort_values("CreateDate", ascending=False).copy()
 
-        # format date for display
         if "CreateDate" in show_df.columns:
             show_df["CreateDate"] = pd.to_datetime(show_df["CreateDate"], errors="coerce").dt.strftime("%m/%d/%Y")
 
         st.dataframe(show_df.style.format({
-            "Price": "${:,.2f}",
-            "Amount": "${:,.2f}",
-            "Quantity": "{:,.0f}",
+            "Price": "${:,.2f}", "Amount": "${:,.2f}", "Quantity": "{:,.0f}",
         }), use_container_width=True, hide_index=True,
         column_config={
             "CreateDate": st.column_config.TextColumn("CreateDate", width="small"),
@@ -512,19 +680,14 @@ with tab_simulator:
                 hypo_ticker = hypo_ticker.upper().strip()
                 if hypo_shares == 0: st.error("Shares cannot be zero.")
                 else:
-                    # try Yahoo validation, fall back to manual price
                     live_price = None
                     try:
                         lp = yf.Ticker(hypo_ticker).fast_info.last_price
-                        if lp and lp > 0:
-                            live_price = round(lp, 2)
-                    except:
-                        pass
-
+                        if lp and lp > 0: live_price = round(lp, 2)
+                    except: pass
                     use_price = live_price if live_price else hypo_price
                     if not live_price:
                         st.warning(f"Could not fetch live price for '{hypo_ticker}'. Using manual price ${hypo_price:,.2f}.")
-
                     existing = [h for h in st.session_state["sim_hypothetical"] if h["ticker"] == hypo_ticker]
                     if existing:
                         idx = st.session_state["sim_hypothetical"].index(existing[0])
@@ -552,14 +715,11 @@ with tab_simulator:
                 "Price ($)": "${:,.2f}",
             }), use_container_width=True, hide_index=True)
 
-            # calculate simulated proceeds from sells/shorts
             sim_proceeds = 0.0
             for h in st.session_state["sim_hypothetical"]:
                 if h["shares"] < 0:
-                    try:
-                        cur_price = yf.Ticker(h["ticker"]).fast_info.last_price
-                    except:
-                        cur_price = h["avg_buy_price"]
+                    try: cur_price = yf.Ticker(h["ticker"]).fast_info.last_price
+                    except: cur_price = h["avg_buy_price"]
                     sim_proceeds += abs(h["shares"]) * cur_price
             if sim_proceeds > 0:
                 st.caption(f"Simulated Proceeds: **${sim_proceeds:,.2f}** (from hypothetical sells/shorts)")
@@ -589,26 +749,20 @@ with tab_simulator:
                 base_rows = portfolio[portfolio["ticker"].isin(selected_base)].copy()
                 hypo_rows = st.session_state["sim_hypothetical"]
 
-                # merge hypothetical into base: subtract/add shares per ticker
                 sim_dict = {}
                 for _, row in base_rows.iterrows():
                     sim_dict[row["ticker"]] = {
                         "ticker": row["ticker"], "shares": row["shares"],
                         "avg_buy_price": row["avg_buy_price"],
                         "date_added": row.get("date_added", "")}
-
                 for h in hypo_rows:
                     t = h["ticker"]
                     if t in sim_dict:
-                        # existing position: adjust shares
                         sim_dict[t]["shares"] += h["shares"]
-                        # if zeroed out, remove
                         if abs(sim_dict[t]["shares"]) < 0.0001:
                             del sim_dict[t]
                     else:
-                        # new position
-                        sim_dict[t] = {
-                            "ticker": t, "shares": h["shares"],
+                        sim_dict[t] = {"ticker": t, "shares": h["shares"],
                             "avg_buy_price": h["avg_buy_price"],
                             "date_added": h.get("date_added", "hypothetical")}
 
@@ -706,29 +860,22 @@ with tab_simulator:
         st.markdown("**Step 4 - Portfolio Optimization (Markowitz)**")
         st.caption("Mean-variance optimization. Long/Short % are maximum caps, not targets.")
 
-        # auto-calculate capital (includes simulated proceeds from Step 2)
         sim_proceeds = st.session_state.get("sim_proceeds", 0.0)
         default_long_pct = 73
         default_short_pct = 27
         if not portfolio.empty:
-            tmv = 0
-            long_val = 0
-            short_val = 0
+            tmv = 0; long_val = 0; short_val = 0
             for t in portfolio["ticker"].tolist():
                 try:
                     p = yf.Ticker(t).fast_info.last_price
                     s = portfolio.loc[portfolio["ticker"] == t, "shares"].iloc[0]
-                    mv = p * s
-                    tmv += mv
-                    if s > 0:
-                        long_val += mv
-                    else:
-                        short_val += abs(mv)
+                    mv = p * s; tmv += mv
+                    if s > 0: long_val += mv
+                    else: short_val += abs(mv)
                 except: pass
             cap_result = calculate_current_capital(tmv)
             default_capital = int(cap_result[0])
             default_capital += int(sim_proceeds)
-            # compute current exposure percentages
             total_cap = default_capital if default_capital > 0 else 1
             default_long_pct = min(100, round(long_val / total_cap * 100))
             default_short_pct = min(100, round(short_val / total_cap * 100))
@@ -780,6 +927,18 @@ with tab_simulator:
                         cur_ret = float(cur_port_ret.mean() * 252) if len(cur_port_ret) > 0 else 0
                         cur_vol = float(cur_port_ret.std() * np.sqrt(252)) if len(cur_port_ret) > 0 else 0
                         cur_sh = (cur_ret - opt_rf) / cur_vol if cur_vol > 0 else 0
+
+                        # compute current portfolio VaR/CVaR/cash/long%/short%
+                        cur_var95, cur_cvar95 = None, None
+                        if len(cur_port_ret) > 30:
+                            cur_sim_daily = np.random.normal(cur_ret/252, cur_vol/np.sqrt(252), 10000)
+                            cur_var95 = round(float(np.percentile(cur_sim_daily, 5)), 6)
+                            cur_cvar95 = round(float(np.mean(cur_sim_daily[cur_sim_daily <= cur_var95])), 6)
+
+                        cur_cash = cash_balance if 'cash_balance' in dir() else None
+                        cur_long_pct_val = round(long_val / total_cap * 100, 1) if total_cap > 0 else None
+                        cur_short_pct_val = round(short_val / total_cap * 100, 1) if total_cap > 0 else None
+
                         opt_result = run_markowitz_optimization(
                             long_tickers=opt_long_list, short_tickers=opt_short_list,
                             prices=opt_prices, rf=opt_rf, total_capital=opt_capital,
@@ -787,7 +946,21 @@ with tab_simulator:
                             max_per_position=opt_max_pos, min_deploy_pct=opt_min_deploy)
                     if "error" in opt_result: st.error(opt_result["error"])
                     else:
-                        opt_result["current"] = {"return": round(cur_ret, 4), "volatility": round(cur_vol, 4), "sharpe": round(cur_sh, 4)}
+                        opt_result["current"] = {
+                            "return": round(cur_ret, 4), "volatility": round(cur_vol, 4),
+                            "sharpe": round(cur_sh, 4),
+                            "var_95": cur_var95, "cvar_95": cur_cvar95,
+                            "cash": cur_cash,
+                            "long_pct": cur_long_pct_val, "short_pct": cur_short_pct_val,
+                        }
+                        # store optimizer internals for custom targets
+                        opt_result["_internals"] = {
+                            "prices": opt_prices, "rf": opt_rf,
+                            "long_tickers": opt_long_list, "short_tickers": opt_short_list,
+                            "total_capital": opt_capital, "max_long_pct": opt_long_pct,
+                            "max_short_pct": opt_short_pct, "max_per_position": opt_max_pos,
+                            "min_deploy_pct": opt_min_deploy,
+                        }
                         st.session_state["markowitz_results"] = opt_result
 
             if "markowitz_results" in st.session_state:
@@ -798,15 +971,23 @@ with tab_simulator:
                 cur_m = mk["current"]
                 ca = mk["constraint_analysis"]
 
-                # efficient frontier
+                # efficient frontier chart
                 st.markdown("**Efficient Frontier**")
                 frontier = mk["frontier"]
-                import plotly.graph_objects as go
+
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(x=frontier["volatilities"], y=frontier["returns"], mode="markers",
                     marker=dict(size=3, color=frontier["sharpes"], colorscale="Viridis", showscale=True,
                                 colorbar=dict(title="Sharpe")),
                     name="Simulated", hovertemplate="Vol: %{x:.2%}<br>Ret: %{y:.2%}"))
+
+                # efficient frontier curve
+                if "frontier_curve" in mk:
+                    fc = mk["frontier_curve"]
+                    fig.add_trace(go.Scatter(x=fc["volatilities"], y=fc["returns"],
+                        mode="lines", line=dict(color="#64ffda", width=2.5, dash="solid"),
+                        name="Efficient Frontier", hovertemplate="Vol: %{x:.2%}<br>Ret: %{y:.2%}"))
+
                 fig.add_trace(go.Scatter(x=[ms["volatility"]], y=[ms["return"]], mode="markers",
                     marker=dict(size=15, color="red", symbol="star"),
                     name=f"Max Sharpe ({ms['sharpe']:.2f})"))
@@ -824,6 +1005,59 @@ with tab_simulator:
                                   height=500, margin=dict(l=40, r=40, t=30, b=40))
                 st.plotly_chart(fig, use_container_width=True)
 
+                # --- Custom Target Allocation ---
+                st.markdown("**Custom Target Allocation**")
+                st.caption("Find the optimal allocation for a specific volatility or return target.")
+                ct1, ct2, ct3 = st.columns([1, 1, 1])
+                with ct1:
+                    target_vol = st.number_input("Target Volatility (%)", min_value=1.0, max_value=50.0,
+                        value=round(cur_m["volatility"] * 100, 1), step=0.5, key="target_vol")
+                    find_vol = st.button("Find Max Return", key="find_vol_btn", use_container_width=True)
+                with ct2:
+                    target_ret = st.number_input("Target Return (%)", min_value=-20.0, max_value=200.0,
+                        value=round(cur_m["return"] * 100, 1), step=1.0, key="target_ret")
+                    find_ret = st.button("Find Min Volatility", key="find_ret_btn", use_container_width=True)
+                with ct3:
+                    st.caption("Slider: explore frontier")
+                    mv_ret = mv["return"] * 100
+                    ms_ret = ms["return"] * 100
+                    slider_ret = st.slider("Target Return (%)", min_value=round(mv_ret, 1),
+                        max_value=round(ms_ret * 1.1, 1), value=round((mv_ret + ms_ret) / 2, 1),
+                        step=0.5, key="slider_ret")
+                    find_slider = st.button("Find Allocation", key="find_slider_btn", use_container_width=True)
+
+                # run custom optimization
+                if (find_vol or find_ret or find_slider) and "_internals" in mk:
+                    internals = mk["_internals"]
+                    from metrics import _run_custom_target_optimization
+                    with st.spinner("Finding optimal allocation..."):
+                        if find_vol:
+                            custom_result = _run_custom_target_optimization(
+                                internals, mode="target_vol", target_value=target_vol / 100)
+                        elif find_ret:
+                            custom_result = _run_custom_target_optimization(
+                                internals, mode="target_ret", target_value=target_ret / 100)
+                        else:
+                            custom_result = _run_custom_target_optimization(
+                                internals, mode="target_ret", target_value=slider_ret / 100)
+
+                    if custom_result and "error" not in custom_result:
+                        st.session_state["custom_target_result"] = custom_result
+                    elif custom_result:
+                        st.warning(custom_result["error"])
+
+                if "custom_target_result" in st.session_state:
+                    ctr_result = st.session_state["custom_target_result"]
+                    ctr_c1, ctr_c2, ctr_c3, ctr_c4 = st.columns(4)
+                    ctr_c1.metric("Expected Return", f"{ctr_result['return']*100:.2f}%")
+                    ctr_c2.metric("Volatility", f"{ctr_result['volatility']*100:.2f}%")
+                    ctr_c3.metric("Sharpe Ratio", f"{ctr_result['sharpe']:.4f}")
+                    ctr_c4.metric("Cash Held", f"${ctr_result.get('cash', 0):,.0f}")
+                    if not ctr_result["table"].empty:
+                        tbl_fmt = {"Dollar Amount ($)": "${:,.2f}", "Weight (%)": "{:.2f}"}
+                        st.dataframe(ctr_result["table"].style.format(tbl_fmt),
+                            use_container_width=True, hide_index=True)
+
                 # constraint analysis box
                 if ca["is_limiting"]:
                     st.info(
@@ -832,17 +1066,15 @@ with tab_simulator:
                         f"Your Limits: **{ca['constrained_long_pct']}% Long / {ca['constrained_short_pct']}% Short**\n\n"
                         f"Your constraints are limiting potential returns. "
                         f"Unconstrained Sharpe: **{ca['uc_sharpe']:.2f}** vs Constrained: **{ca['constrained_sharpe']:.2f}** "
-                        f"(gap: {ca['sharpe_gap']:.4f})"
-                    )
+                        f"(gap: {ca['sharpe_gap']:.4f})")
                 else:
                     st.success(
                         f"**Constraint Analysis**\n\n"
                         f"Unconstrained Optimal: **{ca['uc_long_pct']}% Long / {ca['uc_short_pct']}% Short**\n\n"
                         f"Your Limits: **{ca['constrained_long_pct']}% Long / {ca['constrained_short_pct']}% Short**\n\n"
-                        f"Your constraints are not limiting the optimizer."
-                    )
+                        f"Your constraints are not limiting the optimizer.")
 
-                # metrics comparison — 5 columns
+                # metrics comparison
                 st.markdown("**Metrics Comparison**")
                 comp = [("Expected Return", "return", "{:.2%}"), ("Volatility", "volatility", "{:.2%}"),
                         ("Sharpe Ratio", "sharpe", "{:.4f}"), ("VaR (95%)", "var_95", "{:.4%}"),
@@ -861,10 +1093,8 @@ with tab_simulator:
                     mc4.write(fmt.format(mvv) if mvv is not None else "N/A")
                     mc5.write(fmt.format(ucv) if ucv is not None else "N/A")
 
-                # allocation tables — 3 columns
+                # allocation tables
                 st.divider()
-
-                # detect zeroed-out positions
                 all_input_tickers = set(opt_long_list + opt_short_list)
                 def _get_allocated(table):
                     if table.empty: return set()
@@ -873,11 +1103,9 @@ with tab_simulator:
                 ms_allocated = _get_allocated(ms["table"])
                 mv_allocated = _get_allocated(mv["table"])
                 uc_allocated = _get_allocated(uc["table"])
-
                 ms_zeroed = all_input_tickers - ms_allocated
                 mv_zeroed = all_input_tickers - mv_allocated
                 uc_zeroed = all_input_tickers - uc_allocated
-
                 all_zeroed = ms_zeroed | mv_zeroed | uc_zeroed
                 if all_zeroed:
                     zeroed_notes = []
