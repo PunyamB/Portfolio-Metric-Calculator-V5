@@ -715,9 +715,8 @@ with tab_history:
         if gen_notes_btn and missing_trades:
             with st.spinner(f"Generating notes for {len(missing_trades)} trades..."):
                 try:
-                    import google.generativeai as genai
-                    genai.configure(api_key=gemini_key)
-                    model = genai.GenerativeModel("gemini-2.5-flash")
+                    import requests as req
+                    import time
 
                     # build batch prompt
                     trade_lines = []
@@ -732,22 +731,29 @@ with tab_history:
                         "For each trade below, write ONE line (15-25 words) explaining the likely rationale — "
                         "what sector/theme exposure it adds, whether it's a hedge, value play, momentum bet, "
                         "profit-taking, or rebalancing. Be specific about the company's business.\n\n"
-                        "Format: return ONLY a JSON object where keys are the trade lines exactly as given, "
-                        "and values are the one-line notes. No markdown, no backticks, just raw JSON.\n\n"
+                        "Format: return ONLY a JSON array of strings, one note per trade, in the same order as the trades. "
+                        "No markdown, no backticks, just a raw JSON array.\n\n"
                         "Trades:\n" + "\n".join(trade_lines)
                     )
 
-                    response = model.generate_content(prompt)
-                    raw_text = response.text.strip()
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+                    payload = {
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 4000}
+                    }
+
+                    resp = req.post(url, json=payload, timeout=90)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    raw_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+
                     # strip markdown fences if present
                     if raw_text.startswith("```"): raw_text = raw_text.split("\n", 1)[1]
                     if raw_text.endswith("```"): raw_text = raw_text.rsplit("```", 1)[0]
                     raw_text = raw_text.strip()
 
-                    notes_map = json.loads(raw_text)
+                    notes_list = json.loads(raw_text)
 
-                    # map responses back to trade keys
-                    notes_list = list(notes_map.values())
                     for i, row in enumerate(missing_trades):
                         key = _trade_key(row)
                         if i < len(notes_list):
@@ -759,7 +765,10 @@ with tab_history:
                     st.success(f"Generated {len(missing_trades)} notes.")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Note generation failed: {str(e)}")
+                    err_msg = str(e)
+                    if gemini_key and gemini_key in err_msg:
+                        err_msg = err_msg.replace(gemini_key, "***")
+                    st.error(f"Note generation failed: {err_msg}")
 
         # display notes
         if existing_notes:
@@ -778,7 +787,8 @@ with tab_history:
                         "Note": note,
                     })
             if notes_display:
-                st.dataframe(pd.DataFrame(notes_display), use_container_width=True, hide_index=True,
+                notes_df = pd.DataFrame(notes_display)
+                st.dataframe(notes_df, use_container_width=True, hide_index=True,
                     column_config={
                         "Date": st.column_config.TextColumn("Date", width="small"),
                         "Ticker": st.column_config.TextColumn("Ticker", width="small"),
@@ -786,6 +796,9 @@ with tab_history:
                         "Qty": st.column_config.NumberColumn("Qty", width="small", format="%d"),
                         "Note": st.column_config.TextColumn("Note", width="large"),
                     })
+                csv_data = notes_df.to_csv(index=False)
+                st.download_button("Download Notes CSV", data=csv_data,
+                    file_name="trade_journal.csv", mime="text/csv", key="dl_notes_csv")
 
 
 # === TAB 3: WHAT-IF SIMULATOR ===
