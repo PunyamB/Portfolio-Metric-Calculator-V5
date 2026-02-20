@@ -776,6 +776,8 @@ with tab_history:
                             "- The COMPANY field tells you what the company/ETF actually does. USE IT. Do not guess from the ticker.\n"
                             "- The ACTION field is what happened. A Buy is a BUY. A Sell is a SELL. Do not contradict the action.\n"
                             "- The CONTEXT field tells you if this is a new position, adding to existing, or reducing. USE IT.\n"
+                            "- For SELLS: say 'exiting X exposure' or 'reducing X exposure'. NEVER say 'for X exposure' on a sell.\n"
+                            "- For SHORTS: describe what the short achieves. If shorting a leveraged LONG ETF, say 'bearish bet against X' not 'inverse ETF'.\n"
                             "- Explain what sector/theme/strategy this trade serves based on the COMPANY name\n"
                             "- Use only ASCII characters, no special quotes or dashes\n"
                             "- Be factual about what happened, not speculative\n\n"
