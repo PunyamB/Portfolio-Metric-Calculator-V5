@@ -718,46 +718,55 @@ with tab_history:
                     import requests as req
                     import time
 
-                    # build batch prompt
-                    trade_lines = []
-                    for row in missing_trades:
-                        trade_lines.append(
-                            f"- {row.get('TransactionType', 'Buy')} {abs(row.get('Quantity', 0)):.0f} "
-                            f"{row.get('Symbol', '?')} ({row.get('CompanyName', '')}) "
-                            f"@ ${row.get('Price', 0):,.2f} on {row.get('CreateDate', '?')}")
+                    all_notes = []
+                    # batch in chunks of 15 to avoid token limits
+                    chunk_size = 15
+                    chunks = [missing_trades[i:i+chunk_size] for i in range(0, len(missing_trades), chunk_size)]
 
-                    prompt = (
-                        "You are a portfolio analyst writing concise trade journal notes. "
-                        "For each trade below, write ONE line (15-25 words) explaining the likely rationale — "
-                        "what sector/theme exposure it adds, whether it's a hedge, value play, momentum bet, "
-                        "profit-taking, or rebalancing. Be specific about the company's business.\n\n"
-                        "Format: return ONLY a JSON array of strings, one note per trade, in the same order as the trades. "
-                        "No markdown, no backticks, just a raw JSON array.\n\n"
-                        "Trades:\n" + "\n".join(trade_lines)
-                    )
+                    for chunk_idx, chunk in enumerate(chunks):
+                        trade_lines = []
+                        for row in chunk:
+                            trade_lines.append(
+                                f"- {row.get('TransactionType', 'Buy')} {abs(row.get('Quantity', 0)):.0f} "
+                                f"{row.get('Symbol', '?')} ({row.get('CompanyName', '')}) "
+                                f"@ ${row.get('Price', 0):,.2f} on {row.get('CreateDate', '?')}")
 
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
-                    payload = {
-                        "contents": [{"parts": [{"text": prompt}]}],
-                        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 4000}
-                    }
+                        prompt = (
+                            "You are a portfolio analyst writing concise trade journal notes. "
+                            "For each trade below, write ONE line (15-25 words) explaining the likely rationale — "
+                            "what sector/theme exposure it adds, whether it's a hedge, value play, momentum bet, "
+                            "profit-taking, or rebalancing. Be specific about the company's business.\n\n"
+                            "Format: return ONLY a JSON array of strings, one note per trade, in the same order. "
+                            "No markdown, no backticks, just raw JSON.\n\n"
+                            "Trades:\n" + "\n".join(trade_lines)
+                        )
 
-                    resp = req.post(url, json=payload, timeout=90)
-                    resp.raise_for_status()
-                    data = resp.json()
-                    raw_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+                        payload = {
+                            "contents": [{"parts": [{"text": prompt}]}],
+                            "generationConfig": {"temperature": 0.7, "maxOutputTokens": 2000}
+                        }
 
-                    # strip markdown fences if present
-                    if raw_text.startswith("```"): raw_text = raw_text.split("\n", 1)[1]
-                    if raw_text.endswith("```"): raw_text = raw_text.rsplit("```", 1)[0]
-                    raw_text = raw_text.strip()
+                        resp = req.post(url, json=payload, timeout=90)
+                        resp.raise_for_status()
+                        data = resp.json()
+                        raw_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
 
-                    notes_list = json.loads(raw_text)
+                        if raw_text.startswith("```"): raw_text = raw_text.split("\n", 1)[1]
+                        if raw_text.endswith("```"): raw_text = raw_text.rsplit("```", 1)[0]
+                        raw_text = raw_text.strip()
+
+                        chunk_notes = json.loads(raw_text)
+                        all_notes.extend(chunk_notes)
+
+                        # rate limit pause between chunks
+                        if chunk_idx < len(chunks) - 1:
+                            time.sleep(2)
 
                     for i, row in enumerate(missing_trades):
                         key = _trade_key(row)
-                        if i < len(notes_list):
-                            existing_notes[key] = notes_list[i]
+                        if i < len(all_notes):
+                            existing_notes[key] = all_notes[i]
                         else:
                             existing_notes[key] = "Note generation incomplete."
 
