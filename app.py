@@ -742,15 +742,45 @@ with tab_simulator:
                 "Price ($)": "${:,.2f}",
             }), use_container_width=True, hide_index=True)
 
-            sim_proceeds = 0.0
+            sim_sell_proceeds = 0.0  # from selling existing longs — adds to capital
+            sim_short_proceeds = 0.0  # from new shorts — goes to margin, NOT capital
+            sim_buy_cost = 0.0  # from hypothetical buys — subtracts from capital
+
             for h in st.session_state["sim_hypothetical"]:
+                t = h["ticker"]
+                price = h["avg_buy_price"]  # use the price from the hypothetical (manual or fetched)
                 if h["shares"] < 0:
-                    try: cur_price = yf.Ticker(h["ticker"]).fast_info.last_price
-                    except: cur_price = h["avg_buy_price"]
-                    sim_proceeds += abs(h["shares"]) * cur_price
-            if sim_proceeds > 0:
-                st.caption(f"Simulated Proceeds: **${sim_proceeds:,.2f}** (from hypothetical sells/shorts)")
-            st.session_state["sim_proceeds"] = sim_proceeds
+                    # is this selling an existing long or a new short?
+                    existing_shares = 0
+                    if not portfolio.empty and t in portfolio["ticker"].values:
+                        existing_shares = portfolio.loc[portfolio["ticker"] == t, "shares"].iloc[0]
+                    if existing_shares > 0:
+                        # selling existing long — proceeds are spendable
+                        sell_qty = min(abs(h["shares"]), existing_shares)
+                        short_qty = abs(h["shares"]) - sell_qty
+                        sim_sell_proceeds += sell_qty * price
+                        if short_qty > 0:
+                            sim_short_proceeds += short_qty * price
+                    else:
+                        # new short or adding to existing short — margin held
+                        sim_short_proceeds += abs(h["shares"]) * price
+                else:
+                    # hypothetical buy — costs capital
+                    sim_buy_cost += h["shares"] * price
+
+            if sim_sell_proceeds > 0:
+                st.caption(f"Sell Proceeds: **${sim_sell_proceeds:,.2f}** (from closing longs — adds to capital)")
+            if sim_short_proceeds > 0:
+                st.caption(f"Short Proceeds: **${sim_short_proceeds:,.2f}** (held as margin — not spendable)")
+            if sim_buy_cost > 0:
+                st.caption(f"Buy Cost: **${sim_buy_cost:,.2f}** (from hypothetical buys — subtracts from capital)")
+            net_capital_change = sim_sell_proceeds - sim_buy_cost
+            if net_capital_change != 0:
+                sign = "+" if net_capital_change > 0 else ""
+                st.caption(f"Net Capital Impact: **{sign}${net_capital_change:,.2f}**")
+            st.session_state["sim_sell_proceeds"] = sim_sell_proceeds
+            st.session_state["sim_short_proceeds"] = sim_short_proceeds
+            st.session_state["sim_buy_cost"] = sim_buy_cost
 
             rc1, rc2 = st.columns([3, 1])
             with rc1:
@@ -887,7 +917,29 @@ with tab_simulator:
         st.markdown("**Step 4 - Portfolio Optimization (Markowitz)**")
         st.caption("Mean-variance optimization. Long/Short % are maximum caps, not targets.")
 
-        sim_proceeds = st.session_state.get("sim_proceeds", 0.0)
+        # Build optimizer ticker list from sim_portfolio (post-merge from Step 3)
+        # If Step 3 hasn't run, fall back to selected_base + hypothetical
+        sim_port_for_opt = st.session_state.get("sim_results", {}).get("sim_portfolio", None)
+        if sim_port_for_opt is not None and not sim_port_for_opt.empty:
+            opt_ticker_source = sim_port_for_opt["ticker"].tolist()
+        else:
+            # fallback: merge selected_base + hypothetical manually
+            _opt_dict = {t: True for t in selected_base}
+            for h in st.session_state.get("sim_hypothetical", []):
+                t = h["ticker"]
+                if t in _opt_dict and t in selected_base:
+                    # check if merged shares would be zero
+                    base_shares = portfolio.loc[portfolio["ticker"] == t, "shares"].iloc[0] if t in portfolio["ticker"].values else 0
+                    merged = base_shares + h["shares"]
+                    if abs(merged) < 0.0001:
+                        del _opt_dict[t]  # zeroed out
+                else:
+                    _opt_dict[t] = True
+            opt_ticker_source = list(_opt_dict.keys())
+
+        # Capital calculation: base capital + sell proceeds - buy costs (short proceeds stay as margin)
+        sim_sell_proceeds = st.session_state.get("sim_sell_proceeds", 0.0)
+        sim_buy_cost = st.session_state.get("sim_buy_cost", 0.0)
         default_long_pct = 73
         default_short_pct = 27
         if not portfolio.empty:
@@ -902,7 +954,10 @@ with tab_simulator:
                 except: pass
             cap_result = calculate_current_capital(tmv)
             default_capital = int(cap_result[0])
-            default_capital += int(sim_proceeds)
+            # only add sell proceeds and subtract buy costs (short proceeds = margin, not spendable)
+            default_capital += int(sim_sell_proceeds)
+            default_capital -= int(sim_buy_cost)
+            default_capital = max(default_capital, 0)
             total_cap = default_capital if default_capital > 0 else 1
             default_long_pct = min(100, round(long_val / total_cap * 100))
             default_short_pct = min(100, round(short_val / total_cap * 100))
@@ -919,18 +974,21 @@ with tab_simulator:
         if opt_long_pct + opt_short_pct > 100:
             st.info(f"Note: Long + Short exposure = {opt_long_pct + opt_short_pct}%. This is expected for long-short portfolios using leverage.")
 
-        all_opt_tickers = list(set(
-            [t for t in selected_base] + [h["ticker"] for h in st.session_state.get("sim_hypothetical", [])]))
+        all_opt_tickers = list(set(opt_ticker_source))
 
         if all_opt_tickers:
             st.markdown("**Tag tickers as Long or Short:**")
-            st.caption("Defaults from current portfolio positions.")
+            st.caption("Defaults inferred from simulated portfolio positions.")
             opt_cols = st.columns(min(len(all_opt_tickers), 5))
             opt_long_list, opt_short_list = [], []
             for i, t in enumerate(all_opt_tickers):
                 with opt_cols[i % min(len(all_opt_tickers), 5)]:
+                    # default side from sim_portfolio if available, else from current portfolio
                     default_side = "Long"
-                    if not portfolio.empty and t in portfolio["ticker"].values:
+                    if sim_port_for_opt is not None and not sim_port_for_opt.empty and t in sim_port_for_opt["ticker"].values:
+                        if sim_port_for_opt.loc[sim_port_for_opt["ticker"] == t, "shares"].iloc[0] < 0:
+                            default_side = "Short"
+                    elif not portfolio.empty and t in portfolio["ticker"].values:
                         if portfolio.loc[portfolio["ticker"] == t, "shares"].iloc[0] < 0:
                             default_side = "Short"
                     side = st.radio(t, ["Long", "Short"], index=0 if default_side == "Long" else 1,
