@@ -719,25 +719,25 @@ with tab_history:
                     import time
 
                     all_notes = []
-                    # batch in chunks of 15 to avoid token limits
-                    chunk_size = 15
+                    # batch in chunks of 10 to avoid token limits
+                    chunk_size = 10
                     chunks = [missing_trades[i:i+chunk_size] for i in range(0, len(missing_trades), chunk_size)]
 
                     for chunk_idx, chunk in enumerate(chunks):
                         trade_lines = []
-                        for row in chunk:
+                        for idx, row in enumerate(chunk):
                             trade_lines.append(
-                                f"- {row.get('TransactionType', 'Buy')} {abs(row.get('Quantity', 0)):.0f} "
+                                f"{idx+1}. {row.get('TransactionType', 'Buy')} {abs(row.get('Quantity', 0)):.0f} "
                                 f"{row.get('Symbol', '?')} ({row.get('CompanyName', '')}) "
                                 f"@ ${row.get('Price', 0):,.2f} on {row.get('CreateDate', '?')}")
 
                         prompt = (
-                            "You are a portfolio analyst writing concise trade journal notes. "
-                            "For each trade below, write ONE line (15-25 words) explaining the likely rationale — "
-                            "what sector/theme exposure it adds, whether it's a hedge, value play, momentum bet, "
-                            "profit-taking, or rebalancing. Be specific about the company's business.\n\n"
-                            "Format: return ONLY a JSON array of strings, one note per trade, in the same order. "
-                            "No markdown, no backticks, just raw JSON.\n\n"
+                            "You are a portfolio analyst. For each numbered trade below, write ONE note (15-25 words) "
+                            "explaining the likely rationale. Be specific about sector exposure or strategy.\n\n"
+                            "Reply with ONLY numbered lines like:\n"
+                            "1. Note for trade 1\n"
+                            "2. Note for trade 2\n\n"
+                            "Use only ASCII characters. No special quotes or dashes.\n\n"
                             "Trades:\n" + "\n".join(trade_lines)
                         )
 
@@ -752,11 +752,16 @@ with tab_history:
                         data = resp.json()
                         raw_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
 
-                        if raw_text.startswith("```"): raw_text = raw_text.split("\n", 1)[1]
-                        if raw_text.endswith("```"): raw_text = raw_text.rsplit("```", 1)[0]
-                        raw_text = raw_text.strip()
-
-                        chunk_notes = json.loads(raw_text)
+                        # parse numbered lines
+                        import re
+                        lines = raw_text.split("\n")
+                        chunk_notes = []
+                        for line in lines:
+                            line = line.strip()
+                            # match "1. note text" or "1) note text"
+                            match = re.match(r'^\d+[\.\)]\s*(.+)', line)
+                            if match:
+                                chunk_notes.append(match.group(1).strip())
                         all_notes.extend(chunk_notes)
 
                         # rate limit pause between chunks
