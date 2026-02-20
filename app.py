@@ -716,35 +716,79 @@ with tab_history:
             with st.spinner(f"Generating notes for {len(missing_trades)} trades..."):
                 try:
                     import requests as req
-                    import time
+                    import time, re
+
+                    # build position context: replay trade history chronologically
+                    # to know what position existed BEFORE each trade
+                    sorted_history = trade_history.sort_values("CreateDate", ascending=True)
+                    running_positions = {}  # ticker -> cumulative shares
+                    trade_context = {}  # trade_key -> context string
+
+                    for _, row in sorted_history.iterrows():
+                        sym = row.get("Symbol", "")
+                        qty = abs(row.get("Quantity", 0))
+                        ttype = row.get("TransactionType", "")
+                        key = _trade_key(row)
+
+                        prev_shares = running_positions.get(sym, 0)
+
+                        if ttype == "Buy":
+                            context = f"NEW long position" if prev_shares == 0 else f"ADDING to existing {prev_shares:.0f} share long"
+                            running_positions[sym] = prev_shares + qty
+                        elif ttype == "Sell":
+                            remaining = prev_shares - qty
+                            if prev_shares > 0:
+                                context = f"CLOSING long of {prev_shares:.0f} shares" if remaining <= 0 else f"REDUCING long from {prev_shares:.0f} to {remaining:.0f} shares"
+                            else:
+                                context = f"SELLING"
+                            running_positions[sym] = remaining
+                        elif ttype == "Short":
+                            context = f"NEW short position" if prev_shares == 0 else f"ADDING to existing {abs(prev_shares):.0f} share short"
+                            running_positions[sym] = prev_shares - qty
+                        else:
+                            context = ttype
+
+                        trade_context[key] = context
 
                     all_notes = []
-                    # batch in chunks of 10 to avoid token limits
                     chunk_size = 10
                     chunks = [missing_trades[i:i+chunk_size] for i in range(0, len(missing_trades), chunk_size)]
 
                     for chunk_idx, chunk in enumerate(chunks):
                         trade_lines = []
                         for idx, row in enumerate(chunk):
+                            key = _trade_key(row)
+                            ctx = trade_context.get(key, "")
+                            company = row.get('CompanyName', '')
                             trade_lines.append(
-                                f"{idx+1}. {row.get('TransactionType', 'Buy')} {abs(row.get('Quantity', 0)):.0f} "
-                                f"{row.get('Symbol', '?')} ({row.get('CompanyName', '')}) "
-                                f"@ ${row.get('Price', 0):,.2f} on {row.get('CreateDate', '?')}")
+                                f"{idx+1}. ACTION: {row.get('TransactionType', 'Buy')} "
+                                f"| QTY: {abs(row.get('Quantity', 0)):.0f} shares "
+                                f"| TICKER: {row.get('Symbol', '?')} "
+                                f"| COMPANY: {company} "
+                                f"| PRICE: ${row.get('Price', 0):,.2f} "
+                                f"| DATE: {row.get('CreateDate', '?')} "
+                                f"| CONTEXT: {ctx}")
 
                         prompt = (
-                            "You are a portfolio analyst. For each numbered trade below, write ONE note (15-25 words) "
-                            "explaining the likely rationale. Be specific about sector exposure or strategy.\n\n"
-                            "Reply with ONLY numbered lines like:\n"
+                            "You are a portfolio analyst writing trade journal notes.\n\n"
+                            "RULES:\n"
+                            "- Write exactly ONE note per trade (15-25 words)\n"
+                            "- The COMPANY field tells you what the company/ETF actually does. USE IT. Do not guess from the ticker.\n"
+                            "- The ACTION field is what happened. A Buy is a BUY. A Sell is a SELL. Do not contradict the action.\n"
+                            "- The CONTEXT field tells you if this is a new position, adding to existing, or reducing. USE IT.\n"
+                            "- Explain what sector/theme/strategy this trade serves based on the COMPANY name\n"
+                            "- Use only ASCII characters, no special quotes or dashes\n"
+                            "- Be factual about what happened, not speculative\n\n"
+                            "Reply with ONLY numbered lines:\n"
                             "1. Note for trade 1\n"
                             "2. Note for trade 2\n\n"
-                            "Use only ASCII characters. No special quotes or dashes.\n\n"
                             "Trades:\n" + "\n".join(trade_lines)
                         )
 
                         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
                         payload = {
                             "contents": [{"parts": [{"text": prompt}]}],
-                            "generationConfig": {"temperature": 0.7, "maxOutputTokens": 2000}
+                            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 2000}
                         }
 
                         resp = req.post(url, json=payload, timeout=90)
@@ -752,13 +796,10 @@ with tab_history:
                         data = resp.json()
                         raw_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
 
-                        # parse numbered lines
-                        import re
                         lines = raw_text.split("\n")
                         chunk_notes = []
                         for line in lines:
                             line = line.strip()
-                            # match "1. note text" or "1) note text"
                             match = re.match(r'^\d+[\.\)]\s*(.+)', line)
                             if match:
                                 chunk_notes.append(match.group(1).strip())
