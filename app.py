@@ -571,6 +571,11 @@ with tab_portfolio:
                     with st.spinner("Computing..."):
                         prices_ctr = fetch_price_history(portfolio["ticker"].tolist())
                         ctr_df = calculate_ctr(prices_ctr, portfolio)
+                        # also compute correlation matrix
+                        avail_corr = [t for t in portfolio["ticker"].tolist() if t in prices_ctr.columns]
+                        if len(avail_corr) >= 2:
+                            corr_matrix = prices_ctr[avail_corr].pct_change().dropna().corr()
+                            st.session_state["corr_matrix"] = corr_matrix
                     if ctr_df.empty: st.warning("Need at least 2 positions for CTR.")
                     else: st.session_state["ctr_data"] = ctr_df
 
@@ -581,9 +586,30 @@ with tab_portfolio:
                     if "ctr_data" in st.session_state:
                         ctr = st.session_state["ctr_data"]
                         st.bar_chart(ctr.set_index("Ticker")["CTR (%)"])
-                        st.dataframe(ctr, use_container_width=True, hide_index=True)
                     else:
                         st.caption("Click 'Calculate CTR' to see risk contributions.")
+
+                # correlation heatmap
+                if "corr_matrix" in st.session_state:
+                    st.divider()
+                    st.markdown("**Correlation Matrix**")
+                    corr = st.session_state["corr_matrix"]
+                    fig_corr = go.Figure(data=go.Heatmap(
+                        z=corr.values, x=corr.columns.tolist(), y=corr.index.tolist(),
+                        colorscale=[[0, "#f85149"], [0.5, "#0d1117"], [1, "#3fb950"]],
+                        zmid=0, zmin=-1, zmax=1,
+                        text=corr.round(2).values, texttemplate="%{text}",
+                        textfont=dict(size=10),
+                        hovertemplate="<b>%{x}</b> vs <b>%{y}</b><br>Correlation: %{z:.3f}<extra></extra>",
+                        colorbar=dict(title="ρ"),
+                    ))
+                    fig_corr.update_layout(
+                        height=max(400, len(corr) * 35),
+                        margin=dict(l=10, r=10, t=10, b=10),
+                        xaxis=dict(side="bottom"),
+                        yaxis=dict(autorange="reversed"),
+                    )
+                    st.plotly_chart(fig_corr, use_container_width=True)
 
 
 # === TAB 2: TRADE HISTORY ===
@@ -641,6 +667,125 @@ with tab_history:
             "Currency": st.column_config.TextColumn("Currency", width="small"),
             "SecurityType": st.column_config.TextColumn("SecurityType", width="small"),
         })
+
+        # --- Trade Journal ---
+        st.divider()
+        st.markdown("**Trade Journal**")
+        st.caption("AI-generated notes for each trade. Cached locally — only new trades hit the API.")
+
+        import json, os
+        NOTES_FILE = "trade_notes.json"
+
+        def _load_notes():
+            if os.path.exists(NOTES_FILE):
+                try:
+                    with open(NOTES_FILE, "r") as f: return json.load(f)
+                except: pass
+            return {}
+
+        def _save_notes(notes):
+            with open(NOTES_FILE, "w") as f: json.dump(notes, f, indent=2)
+
+        def _trade_key(row):
+            return f"{row.get('CreateDate', '')}_{row.get('Symbol', '')}_{row.get('TransactionType', '')}_{row.get('Quantity', '')}"
+
+        existing_notes = _load_notes()
+
+        # find trades without notes
+        all_trade_keys = []
+        missing_trades = []
+        for _, row in trade_history.iterrows():
+            key = _trade_key(row)
+            all_trade_keys.append(key)
+            if key not in existing_notes:
+                missing_trades.append(row)
+
+        gemini_key = st.secrets.get("GEMINI_API_KEY", "")
+        jn_c1, jn_c2 = st.columns([3, 1])
+        with jn_c1:
+            if missing_trades:
+                st.caption(f"{len(missing_trades)} trades without notes. Click to generate.")
+            else:
+                st.caption(f"All {len(all_trade_keys)} trades have notes.")
+        with jn_c2:
+            gen_notes_btn = st.button("Generate Notes", key="gen_notes_btn",
+                type="primary", use_container_width=True,
+                disabled=not gemini_key or len(missing_trades) == 0)
+
+        if gen_notes_btn and missing_trades:
+            with st.spinner(f"Generating notes for {len(missing_trades)} trades..."):
+                try:
+                    import google.generativeai as genai
+                    genai.configure(api_key=gemini_key)
+                    model = genai.GenerativeModel("gemini-2.5-flash")
+
+                    # build batch prompt
+                    trade_lines = []
+                    for row in missing_trades:
+                        trade_lines.append(
+                            f"- {row.get('TransactionType', 'Buy')} {abs(row.get('Quantity', 0)):.0f} "
+                            f"{row.get('Symbol', '?')} ({row.get('CompanyName', '')}) "
+                            f"@ ${row.get('Price', 0):,.2f} on {row.get('CreateDate', '?')}")
+
+                    prompt = (
+                        "You are a portfolio analyst writing concise trade journal notes. "
+                        "For each trade below, write ONE line (15-25 words) explaining the likely rationale — "
+                        "what sector/theme exposure it adds, whether it's a hedge, value play, momentum bet, "
+                        "profit-taking, or rebalancing. Be specific about the company's business.\n\n"
+                        "Format: return ONLY a JSON object where keys are the trade lines exactly as given, "
+                        "and values are the one-line notes. No markdown, no backticks, just raw JSON.\n\n"
+                        "Trades:\n" + "\n".join(trade_lines)
+                    )
+
+                    response = model.generate_content(prompt)
+                    raw_text = response.text.strip()
+                    # strip markdown fences if present
+                    if raw_text.startswith("```"): raw_text = raw_text.split("\n", 1)[1]
+                    if raw_text.endswith("```"): raw_text = raw_text.rsplit("```", 1)[0]
+                    raw_text = raw_text.strip()
+
+                    notes_map = json.loads(raw_text)
+
+                    # map responses back to trade keys
+                    notes_list = list(notes_map.values())
+                    for i, row in enumerate(missing_trades):
+                        key = _trade_key(row)
+                        if i < len(notes_list):
+                            existing_notes[key] = notes_list[i]
+                        else:
+                            existing_notes[key] = "Note generation incomplete."
+
+                    _save_notes(existing_notes)
+                    st.success(f"Generated {len(missing_trades)} notes.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Note generation failed: {str(e)}")
+
+        # display notes
+        if existing_notes:
+            notes_display = []
+            for _, row in filtered.sort_values("CreateDate", ascending=False).iterrows():
+                key = _trade_key(row)
+                date_str = pd.to_datetime(row.get("CreateDate"), errors="coerce")
+                date_fmt = date_str.strftime("%m/%d/%Y") if pd.notna(date_str) else str(row.get("CreateDate", ""))
+                note = existing_notes.get(key, "")
+                if note:
+                    notes_display.append({
+                        "Date": date_fmt,
+                        "Ticker": row.get("Symbol", ""),
+                        "Action": row.get("TransactionType", ""),
+                        "Qty": abs(row.get("Quantity", 0)),
+                        "Note": note,
+                    })
+            if notes_display:
+                st.dataframe(pd.DataFrame(notes_display), use_container_width=True, hide_index=True,
+                    column_config={
+                        "Date": st.column_config.TextColumn("Date", width="small"),
+                        "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+                        "Action": st.column_config.TextColumn("Action", width="small"),
+                        "Qty": st.column_config.NumberColumn("Qty", width="small", format="%d"),
+                        "Note": st.column_config.TextColumn("Note", width="large"),
+                    })
 
 
 # === TAB 3: WHAT-IF SIMULATOR ===
