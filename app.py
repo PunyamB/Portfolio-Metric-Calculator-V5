@@ -827,12 +827,24 @@ with tab_simulator:
                 with st.spinner("Running simulation..."):
                     m.LOOKBACK_YEARS = {"1 Year": 1, "3 Years": 3, "5 Years": 5, "10 Years": 10, "15 Years": 15}[sim_lookback]
                     all_sim_tickers = list(set(portfolio["ticker"].tolist() + sim_portfolio["ticker"].tolist()))
-                    shared_prices = fetch_price_history(all_sim_tickers)
+                    shared_prices = fetch_price_history(all_sim_tickers + ["^GSPC"])
                     shared_rf = get_risk_free_rate()
                     current_metrics = run_all_metrics_with_prices(portfolio, shared_prices, shared_rf)
                     sim_metrics = run_all_metrics_with_prices(sim_portfolio, shared_prices, shared_rf)
                     cur_ctr = calculate_ctr(shared_prices, portfolio)
                     sim_ctr = calculate_ctr(shared_prices, sim_portfolio)
+
+                    # compute correlation with S&P 500
+                    if "^GSPC" in shared_prices.columns:
+                        sp_ret = shared_prices["^GSPC"].pct_change().dropna()
+                        cur_port_ret = compute_portfolio_returns(shared_prices, portfolio)
+                        sim_port_ret = compute_portfolio_returns(shared_prices, sim_portfolio)
+                        if len(cur_port_ret) > 10 and len(sp_ret) > 10:
+                            common_cur = cur_port_ret.index.intersection(sp_ret.index)
+                            current_metrics["S&P 500 Correlation"] = round(float(cur_port_ret.loc[common_cur].corr(sp_ret.loc[common_cur])), 4)
+                        if len(sim_port_ret) > 10 and len(sp_ret) > 10:
+                            common_sim = sim_port_ret.index.intersection(sp_ret.index)
+                            sim_metrics["S&P 500 Correlation"] = round(float(sim_port_ret.loc[common_sim].corr(sp_ret.loc[common_sim])), 4)
                 if "error" in sim_metrics: st.error(sim_metrics["error"])
                 else:
                     st.session_state["sim_results"] = {
@@ -865,6 +877,7 @@ with tab_simulator:
                 ("CVaR (95%)", "CVaR (95%)", "{:.4%}", False),
                 ("Beta", "Beta", "{:.4f}", False),
                 ("Alpha (Annual)", "Alpha (Annual)", "{:.2%}", True),
+                ("S&P 500 Correlation", "S&P 500 Correlation", "{:.4f}", False),
             ]
             h1, h2, h3, h4 = st.columns([2, 1.5, 1.5, 1.5])
             h1.markdown("**Metric**"); h2.markdown("**Current**"); h3.markdown("**Simulated**"); h4.markdown("**Delta**")
