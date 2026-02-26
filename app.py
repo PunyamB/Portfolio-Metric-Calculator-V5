@@ -669,6 +669,8 @@ with tab_history:
         })
 
 
+
+
 # === TAB 3: WHAT-IF SIMULATOR ===
 with tab_simulator:
     st.subheader("What-If Portfolio Simulator")
@@ -677,543 +679,577 @@ with tab_simulator:
     if portfolio.empty:
         st.info("Add at least one position first.")
     else:
-        st.markdown("**Step 1 - Choose base holdings**")
         all_tickers = portfolio["ticker"].tolist()
-        cols = st.columns(5)
-        selected_base = []
-        for i, ticker in enumerate(all_tickers):
-            with cols[i % 5]:
-                shares = portfolio.loc[portfolio["ticker"] == ticker, "shares"].iloc[0]
-                label = f"{ticker} (Short)" if shares < 0 else ticker
-                if st.checkbox(label, value=True, key=f"sim_base_{ticker}"):
-                    selected_base.append(ticker)
-        if not selected_base: st.warning("Select at least one holding.")
-
-        st.divider()
-        st.markdown("**Step 2 - Add hypothetical positions**")
-        st.caption("Use negative shares to simulate short positions.")
         if "sim_hypothetical" not in st.session_state:
             st.session_state["sim_hypothetical"] = []
 
-        with st.form("add_hypo_form"):
-            hc1, hc2, hc3, hc4 = st.columns([2, 1, 1, 1])
-            with hc1: hypo_ticker = st.text_input("Ticker", placeholder="e.g. MSFT")
-            with hc2: hypo_shares = st.number_input("Shares", step=1, value=1, help="Negative = short")
-            with hc3: hypo_price = st.number_input("Price ($)", min_value=0.01, step=0.25, format="%.2f", value=100.0)
-            with hc4:
-                st.write(""); st.write("")
-                add_hypo = st.form_submit_button("Add", use_container_width=True)
-            if add_hypo and hypo_ticker:
-                hypo_ticker = hypo_ticker.upper().strip()
-                if hypo_shares == 0: st.error("Shares cannot be zero.")
-                else:
-                    live_price = None
-                    try:
-                        lp = yf.Ticker(hypo_ticker).fast_info.last_price
-                        if lp and lp > 0: live_price = round(lp, 2)
-                    except: pass
-                    use_price = live_price if live_price else hypo_price
-                    if not live_price:
-                        st.warning(f"Could not fetch live price for '{hypo_ticker}'. Using manual price ${hypo_price:,.2f}.")
-                    existing = [h for h in st.session_state["sim_hypothetical"] if h["ticker"] == hypo_ticker]
-                    if existing:
-                        idx = st.session_state["sim_hypothetical"].index(existing[0])
-                        old = existing[0]
-                        ns = old["shares"] + hypo_shares
-                        if ns == 0: st.session_state["sim_hypothetical"].pop(idx)
+        sim_sub_simulation, sim_sub_optimization = st.tabs(["Simulation", "Optimization"])
+
+        # ============================================================
+        # SUB-TAB: SIMULATION
+        # ============================================================
+        with sim_sub_simulation:
+
+            # Step 1 — base holdings (collapsible)
+            with st.expander("Step 1 — Choose base holdings", expanded="sim_results" not in st.session_state):
+                cols = st.columns(5)
+                selected_base = []
+                for i, ticker in enumerate(all_tickers):
+                    with cols[i % 5]:
+                        shares = portfolio.loc[portfolio["ticker"] == ticker, "shares"].iloc[0]
+                        label = f"{ticker} (Short)" if shares < 0 else ticker
+                        if st.checkbox(label, value=True, key=f"sim_base_{ticker}"):
+                            selected_base.append(ticker)
+                if not selected_base: st.warning("Select at least one holding.")
+
+            st.session_state["_selected_base"] = selected_base
+
+            # Step 2 — hypothetical positions (collapsible)
+            with st.expander("Step 2 — Add hypothetical positions", expanded="sim_results" not in st.session_state):
+                st.caption("Use negative shares to simulate short positions.")
+                with st.form("add_hypo_form"):
+                    hc1, hc2, hc3, hc4 = st.columns([2, 1, 1, 1])
+                    with hc1: hypo_ticker = st.text_input("Ticker", placeholder="e.g. MSFT")
+                    with hc2: hypo_shares = st.number_input("Shares", step=1, value=1, help="Negative = short")
+                    with hc3: hypo_price = st.number_input("Price ($)", min_value=0.01, step=0.25, format="%.2f", value=100.0)
+                    with hc4:
+                        st.write(""); st.write("")
+                        add_hypo = st.form_submit_button("Add", use_container_width=True)
+                    if add_hypo and hypo_ticker:
+                        hypo_ticker = hypo_ticker.upper().strip()
+                        if hypo_shares == 0: st.error("Shares cannot be zero.")
                         else:
-                            tc = abs(old["shares"]) * old["avg_buy_price"] + abs(hypo_shares) * use_price
-                            tq = abs(old["shares"]) + abs(hypo_shares)
-                            st.session_state["sim_hypothetical"][idx] = {
-                                "ticker": hypo_ticker, "shares": ns,
-                                "avg_buy_price": round(tc/tq, 4), "date_added": old["date_added"]}
-                    else:
-                        st.session_state["sim_hypothetical"].append({
-                            "ticker": hypo_ticker, "shares": hypo_shares,
-                            "avg_buy_price": use_price, "date_added": "hypothetical"})
-                    st.rerun()
+                            live_price = None
+                            try:
+                                lp = yf.Ticker(hypo_ticker).fast_info.last_price
+                                if lp and lp > 0: live_price = round(lp, 2)
+                            except: pass
+                            use_price = live_price if live_price else hypo_price
+                            if not live_price:
+                                st.warning(f"Could not fetch live price for '{hypo_ticker}'. Using manual price ${hypo_price:,.2f}.")
+                            existing = [h for h in st.session_state["sim_hypothetical"] if h["ticker"] == hypo_ticker]
+                            if existing:
+                                idx = st.session_state["sim_hypothetical"].index(existing[0])
+                                old = existing[0]
+                                ns = old["shares"] + hypo_shares
+                                if ns == 0: st.session_state["sim_hypothetical"].pop(idx)
+                                else:
+                                    tc = abs(old["shares"]) * old["avg_buy_price"] + abs(hypo_shares) * use_price
+                                    tq = abs(old["shares"]) + abs(hypo_shares)
+                                    st.session_state["sim_hypothetical"][idx] = {
+                                        "ticker": hypo_ticker, "shares": ns,
+                                        "avg_buy_price": round(tc/tq, 4), "date_added": old["date_added"]}
+                            else:
+                                st.session_state["sim_hypothetical"].append({
+                                    "ticker": hypo_ticker, "shares": hypo_shares,
+                                    "avg_buy_price": use_price, "date_added": "hypothetical"})
+                            st.rerun()
 
-        if st.session_state["sim_hypothetical"]:
-            st.markdown("**Hypothetical positions:**")
-            hypo_df = pd.DataFrame(st.session_state["sim_hypothetical"])
-            hd = hypo_df[["ticker", "shares", "avg_buy_price"]].copy()
-            hd["Type"] = hd["shares"].apply(lambda s: "Short" if s < 0 else "Long")
-            st.dataframe(hd.rename(columns={"ticker": "Ticker", "shares": "Shares", "avg_buy_price": "Price ($)"}).style.format({
-                "Price ($)": "${:,.2f}",
-            }), use_container_width=True, hide_index=True)
+                if st.session_state["sim_hypothetical"]:
+                    hypo_df = pd.DataFrame(st.session_state["sim_hypothetical"])
+                    hd = hypo_df[["ticker", "shares", "avg_buy_price"]].copy()
+                    hd["Type"] = hd["shares"].apply(lambda s: "Short" if s < 0 else "Long")
+                    st.dataframe(hd.rename(columns={"ticker": "Ticker", "shares": "Shares", "avg_buy_price": "Price ($)"}).style.format({
+                        "Price ($)": "${:,.2f}",
+                    }), use_container_width=True, hide_index=True)
 
-            sim_sell_proceeds = 0.0  # from selling existing longs — adds to capital
-            sim_short_proceeds = 0.0  # from new shorts — goes to margin, NOT capital
-            sim_buy_cost = 0.0  # from hypothetical buys — subtracts from capital
-
-            for h in st.session_state["sim_hypothetical"]:
-                t = h["ticker"]
-                price = h["avg_buy_price"]  # use the price from the hypothetical (manual or fetched)
-                if h["shares"] < 0:
-                    # is this selling an existing long or a new short?
-                    existing_shares = 0
-                    if not portfolio.empty and t in portfolio["ticker"].values:
-                        existing_shares = portfolio.loc[portfolio["ticker"] == t, "shares"].iloc[0]
-                    if existing_shares > 0:
-                        # selling existing long — proceeds are spendable
-                        sell_qty = min(abs(h["shares"]), existing_shares)
-                        short_qty = abs(h["shares"]) - sell_qty
-                        sim_sell_proceeds += sell_qty * price
-                        if short_qty > 0:
-                            sim_short_proceeds += short_qty * price
-                    else:
-                        # new short or adding to existing short — margin held
-                        sim_short_proceeds += abs(h["shares"]) * price
-                else:
-                    # hypothetical buy — costs capital
-                    sim_buy_cost += h["shares"] * price
-
-            if sim_sell_proceeds > 0:
-                st.caption(f"Sell Proceeds: **${sim_sell_proceeds:,.2f}** (from closing longs — adds to capital)")
-            if sim_short_proceeds > 0:
-                st.caption(f"Short Proceeds: **${sim_short_proceeds:,.2f}** (held as margin — not spendable)")
-            if sim_buy_cost > 0:
-                st.caption(f"Buy Cost: **${sim_buy_cost:,.2f}** (from hypothetical buys — subtracts from capital)")
-            net_capital_change = sim_sell_proceeds - sim_buy_cost
-            if net_capital_change != 0:
-                sign = "+" if net_capital_change > 0 else ""
-                st.caption(f"Net Capital Impact: **{sign}${net_capital_change:,.2f}**")
-            st.session_state["sim_sell_proceeds"] = sim_sell_proceeds
-            st.session_state["sim_short_proceeds"] = sim_short_proceeds
-            st.session_state["sim_buy_cost"] = sim_buy_cost
-
-            rc1, rc2 = st.columns([3, 1])
-            with rc1:
-                remove_hypo = st.selectbox("Remove", options=[""] + [h["ticker"] for h in st.session_state["sim_hypothetical"]], key="rm_hypo")
-            with rc2:
-                st.write(""); st.write("")
-                if st.button("Remove", key="rm_btn") and remove_hypo:
-                    st.session_state["sim_hypothetical"] = [h for h in st.session_state["sim_hypothetical"] if h["ticker"] != remove_hypo]
-                    st.rerun()
-
-        st.divider()
-        st.markdown("**Step 3 - Run simulation**")
-        s1, s2 = st.columns([2, 1])
-        with s1: sim_lookback = st.selectbox("Lookback", ["1 Year", "3 Years", "5 Years", "10 Years", "15 Years"], index=1, key="sim_lookback")
-        with s2:
-            st.write("")
-            run_sim = st.button("Run Simulation", type="primary", use_container_width=True, key="run_sim_btn")
-
-        if run_sim:
-            if not selected_base and not st.session_state["sim_hypothetical"]:
-                st.error("Need at least one position.")
-            else:
-                base_rows = portfolio[portfolio["ticker"].isin(selected_base)].copy()
-                hypo_rows = st.session_state["sim_hypothetical"]
-
-                sim_dict = {}
-                for _, row in base_rows.iterrows():
-                    sim_dict[row["ticker"]] = {
-                        "ticker": row["ticker"], "shares": row["shares"],
-                        "avg_buy_price": row["avg_buy_price"],
-                        "date_added": row.get("date_added", "")}
-                for h in hypo_rows:
-                    t = h["ticker"]
-                    if t in sim_dict:
-                        sim_dict[t]["shares"] += h["shares"]
-                        if abs(sim_dict[t]["shares"]) < 0.0001:
-                            del sim_dict[t]
-                    else:
-                        sim_dict[t] = {"ticker": t, "shares": h["shares"],
-                            "avg_buy_price": h["avg_buy_price"],
-                            "date_added": h.get("date_added", "hypothetical")}
-
-                sim_portfolio = pd.DataFrame(list(sim_dict.values())) if sim_dict else pd.DataFrame(columns=["ticker", "shares", "avg_buy_price", "date_added"])
-                with st.spinner("Running simulation..."):
-                    m.LOOKBACK_YEARS = {"1 Year": 1, "3 Years": 3, "5 Years": 5, "10 Years": 10, "15 Years": 15}[sim_lookback]
-                    all_sim_tickers = list(set(portfolio["ticker"].tolist() + sim_portfolio["ticker"].tolist()))
-                    shared_prices = fetch_price_history(all_sim_tickers + ["^GSPC"])
-                    shared_rf = get_risk_free_rate()
-                    current_metrics = run_all_metrics_with_prices(portfolio, shared_prices, shared_rf)
-                    sim_metrics = run_all_metrics_with_prices(sim_portfolio, shared_prices, shared_rf)
-                    cur_ctr = calculate_ctr(shared_prices, portfolio)
-                    sim_ctr = calculate_ctr(shared_prices, sim_portfolio)
-
-                    # compute correlation with S&P 500
-                    if "^GSPC" in shared_prices.columns:
-                        sp_ret = shared_prices["^GSPC"].pct_change().dropna()
-                        cur_port_ret = compute_portfolio_returns(shared_prices, portfolio)
-                        sim_port_ret = compute_portfolio_returns(shared_prices, sim_portfolio)
-                        if len(cur_port_ret) > 10 and len(sp_ret) > 10:
-                            common_cur = cur_port_ret.index.intersection(sp_ret.index)
-                            current_metrics["S&P 500 Correlation"] = round(float(cur_port_ret.loc[common_cur].corr(sp_ret.loc[common_cur])), 4)
-                        if len(sim_port_ret) > 10 and len(sp_ret) > 10:
-                            common_sim = sim_port_ret.index.intersection(sp_ret.index)
-                            sim_metrics["S&P 500 Correlation"] = round(float(sim_port_ret.loc[common_sim].corr(sp_ret.loc[common_sim])), 4)
-                if "error" in sim_metrics: st.error(sim_metrics["error"])
-                else:
-                    st.session_state["sim_results"] = {
-                        "current": current_metrics, "simulated": sim_metrics,
-                        "selected_base": selected_base,
-                        "hypothetical": [h["ticker"] for h in st.session_state["sim_hypothetical"]],
-                        "sim_portfolio": sim_portfolio, "cur_ctr": cur_ctr, "sim_ctr": sim_ctr}
-
-        if "sim_results" in st.session_state:
-            res = st.session_state["sim_results"]
-            cur, sim = res["current"], res["simulated"]
-            st.divider()
-            st.markdown("**Results**")
-            ic1, ic2 = st.columns(2)
-            ic1.caption(f"Base: {', '.join(res['selected_base']) or 'None'}")
-            ic2.caption(f"Hypothetical: {', '.join(res['hypothetical']) or 'None'}")
-
-            metric_defs = [
-                ("Variance (Daily)", "Variance (Daily)", "{:.6f}", False),
-                ("Std Dev (Daily)", "Std Dev (Daily)", "{:.6f}", False),
-                ("Std Dev (Annual)", "Std Dev (Annual)", "{:.2%}", False),
-                ("Skewness", "Skewness", "{:.4f}", False),
-                ("Kurtosis", "Kurtosis", "{:.4f}", False),
-                ("CAGR", "CAGR", "{:.2%}", True),
-                ("Max Drawdown", "Max Drawdown", "{:.2%}", True),
-                ("Sharpe Ratio", "Sharpe Ratio", "{:.4f}", True),
-                ("Sortino Ratio", "Sortino Ratio", "{:.4f}", True),
-                ("Calmar Ratio", "Calmar Ratio", "{:.4f}", True),
-                ("VaR (95%)", "VaR (95%)", "{:.4%}", False),
-                ("CVaR (95%)", "CVaR (95%)", "{:.4%}", False),
-                ("Beta", "Beta", "{:.4f}", False),
-                ("Alpha (Annual)", "Alpha (Annual)", "{:.2%}", True),
-                ("S&P 500 Correlation", "S&P 500 Correlation", "{:.4f}", False),
-            ]
-            h1, h2, h3, h4 = st.columns([2, 1.5, 1.5, 1.5])
-            h1.markdown("**Metric**"); h2.markdown("**Current**"); h3.markdown("**Simulated**"); h4.markdown("**Delta**")
-            st.markdown("---")
-            for label, key, fmt, hb in metric_defs:
-                cv, sv = cur.get(key), sim.get(key)
-                r1, r2, r3, r4 = st.columns([2, 1.5, 1.5, 1.5])
-                r1.write(label)
-                r2.write(fmt.format(cv) if cv is not None else "N/A")
-                r3.write(fmt.format(sv) if sv is not None else "N/A")
-                if cv is not None and sv is not None:
-                    d = sv - cv; p = "+" if d > 0 else ""
-                    c = ("green" if d > 0 else "red") if hb else ("green" if d < 0 else "red")
-                    r4.markdown(f":{c}[{p}{fmt.format(d)}]")
-                else: r4.write("-")
-            st.caption(f"Risk-free rate: {cur.get('Risk-Free Rate Used', 0)*100:.2f}% | Lookback: {sim_lookback}")
-
-            st.divider()
-            st.markdown("**Portfolio Comparison**")
-            wl, wr = st.columns(2)
-            with wl:
-                st.markdown("Current - Weight")
-                cw = portfolio[portfolio["ticker"].isin(res["selected_base"])].copy()
-                if not cw.empty: st.bar_chart(cw.set_index("ticker")["shares"].rename("Weight"))
-            with wr:
-                st.markdown("Simulated - Weight")
-                sp = res["sim_portfolio"]
-                if not sp.empty: st.bar_chart(sp.set_index("ticker")["shares"].rename("Weight"))
-
-            cl, cr = st.columns(2)
-            with cl:
-                st.markdown("Current - CTR")
-                if not res["cur_ctr"].empty:
-                    st.bar_chart(res["cur_ctr"].set_index("Ticker")["CTR (%)"])
-                    st.dataframe(res["cur_ctr"], use_container_width=True, hide_index=True)
-            with cr:
-                st.markdown("Simulated - CTR")
-                if not res["sim_ctr"].empty:
-                    st.bar_chart(res["sim_ctr"].set_index("Ticker")["CTR (%)"])
-                    st.dataframe(res["sim_ctr"], use_container_width=True, hide_index=True)
-
-            st.divider()
-            if st.button("Reset Simulator", key="reset_sim"):
-                for k in ["sim_results", "sim_hypothetical", "markowitz_results"]:
-                    st.session_state.pop(k, None)
-                st.rerun()
-
-        # --- step 4: markowitz ---
-        st.divider()
-        st.markdown("**Step 4 - Portfolio Optimization (Markowitz)**")
-        st.caption("Mean-variance optimization. Long/Short % are maximum caps, not targets.")
-
-        # Build optimizer ticker list from sim_portfolio (post-merge from Step 3)
-        # If Step 3 hasn't run, fall back to selected_base + hypothetical
-        sim_port_for_opt = st.session_state.get("sim_results", {}).get("sim_portfolio", None)
-        if sim_port_for_opt is not None and not sim_port_for_opt.empty:
-            opt_ticker_source = sim_port_for_opt["ticker"].tolist()
-        else:
-            # fallback: merge selected_base + hypothetical manually
-            _opt_dict = {t: True for t in selected_base}
-            for h in st.session_state.get("sim_hypothetical", []):
-                t = h["ticker"]
-                if t in _opt_dict and t in selected_base:
-                    # check if merged shares would be zero
-                    base_shares = portfolio.loc[portfolio["ticker"] == t, "shares"].iloc[0] if t in portfolio["ticker"].values else 0
-                    merged = base_shares + h["shares"]
-                    if abs(merged) < 0.0001:
-                        del _opt_dict[t]  # zeroed out
-                else:
-                    _opt_dict[t] = True
-            opt_ticker_source = list(_opt_dict.keys())
-
-        # Capital calculation: base capital + sell proceeds - buy costs (short proceeds stay as margin)
-        sim_sell_proceeds = st.session_state.get("sim_sell_proceeds", 0.0)
-        sim_buy_cost = st.session_state.get("sim_buy_cost", 0.0)
-        default_long_pct = 73
-        default_short_pct = 27
-        if not portfolio.empty:
-            tmv = 0; long_val = 0; short_val = 0
-            for t in portfolio["ticker"].tolist():
-                try:
-                    p = yf.Ticker(t).fast_info.last_price
-                    s = portfolio.loc[portfolio["ticker"] == t, "shares"].iloc[0]
-                    mv = p * s; tmv += mv
-                    if s > 0: long_val += mv
-                    else: short_val += abs(mv)
-                except: pass
-            cap_result = calculate_current_capital(tmv)
-            default_capital = int(cap_result[0])
-            # only add sell proceeds and subtract buy costs (short proceeds = margin, not spendable)
-            default_capital += int(sim_sell_proceeds)
-            default_capital -= int(sim_buy_cost)
-            default_capital = max(default_capital, 0)
-            total_cap = default_capital if default_capital > 0 else 1
-            default_long_pct = min(100, round(long_val / total_cap * 100))
-            default_short_pct = min(100, round(short_val / total_cap * 100))
-        else:
-            default_capital = 1_000_000
-
-        opt_c1, opt_c2, opt_c3, opt_c4, opt_c5 = st.columns(5)
-        with opt_c1: opt_capital = st.number_input("Total Capital ($)", value=default_capital, step=10000, key="opt_capital")
-        with opt_c2: opt_long_pct = st.number_input("Max Long %", value=default_long_pct, min_value=0, max_value=100, step=1, key="opt_long_pct")
-        with opt_c3: opt_short_pct = st.number_input("Max Short %", value=default_short_pct, min_value=0, max_value=100, step=1, key="opt_short_pct")
-        with opt_c4: opt_max_pos = st.number_input("Max Per Position ($)", value=90000, step=5000, key="opt_max_pos")
-        with opt_c5: opt_min_deploy = st.number_input("Min Deploy %", value=95, min_value=50, max_value=100, step=1, key="opt_min_deploy")
-
-        if opt_long_pct + opt_short_pct > 100:
-            st.info(f"Note: Long + Short exposure = {opt_long_pct + opt_short_pct}%. This is expected for long-short portfolios using leverage.")
-
-        all_opt_tickers = list(set(opt_ticker_source))
-
-        if all_opt_tickers:
-            st.markdown("**Tag tickers as Long or Short:**")
-            st.caption("Defaults inferred from simulated portfolio positions.")
-            opt_cols = st.columns(min(len(all_opt_tickers), 5))
-            opt_long_list, opt_short_list = [], []
-            for i, t in enumerate(all_opt_tickers):
-                with opt_cols[i % min(len(all_opt_tickers), 5)]:
-                    # default side from sim_portfolio if available, else from current portfolio
-                    default_side = "Long"
-                    if sim_port_for_opt is not None and not sim_port_for_opt.empty and t in sim_port_for_opt["ticker"].values:
-                        if sim_port_for_opt.loc[sim_port_for_opt["ticker"] == t, "shares"].iloc[0] < 0:
-                            default_side = "Short"
-                    elif not portfolio.empty and t in portfolio["ticker"].values:
-                        if portfolio.loc[portfolio["ticker"] == t, "shares"].iloc[0] < 0:
-                            default_side = "Short"
-                    side = st.radio(t, ["Long", "Short"], index=0 if default_side == "Long" else 1,
-                                    key=f"opt_side_{t}", horizontal=True)
-                    if side == "Long": opt_long_list.append(t)
-                    else: opt_short_list.append(t)
-
-            if not opt_long_list: st.warning("Select at least one Long ticker.")
-
-            if st.button("Run Optimization", type="primary", key="run_opt_btn"):
-                if not opt_long_list:
-                    st.error("Need at least one Long ticker.")
-                elif len(opt_long_list) + len(opt_short_list) < 2:
-                    st.error("Need at least 2 tickers total.")
-                else:
-                    with st.spinner("Running Markowitz optimization..."):
-                        opt_yrs = {"1 Year": 1, "3 Years": 3, "5 Years": 5, "10 Years": 10, "15 Years": 15}.get(sim_lookback, 3)
-                        opt_prices = fetch_price_history(opt_long_list + opt_short_list, years=opt_yrs)
-                        opt_rf = get_risk_free_rate()
-                        cur_port_ret = compute_portfolio_returns(opt_prices, portfolio)
-                        cur_ret = float(cur_port_ret.mean() * 252) if len(cur_port_ret) > 0 else 0
-                        cur_vol = float(cur_port_ret.std() * np.sqrt(252)) if len(cur_port_ret) > 0 else 0
-                        cur_sh = (cur_ret - opt_rf) / cur_vol if cur_vol > 0 else 0
-
-                        # compute current portfolio VaR/CVaR/cash/long%/short%
-                        cur_var95, cur_cvar95 = None, None
-                        if len(cur_port_ret) > 30:
-                            cur_sim_daily = np.random.normal(cur_ret/252, cur_vol/np.sqrt(252), 10000)
-                            cur_var95 = round(float(np.percentile(cur_sim_daily, 5)), 6)
-                            cur_cvar95 = round(float(np.mean(cur_sim_daily[cur_sim_daily <= cur_var95])), 6)
-
-                        cur_cash = cash_balance if 'cash_balance' in dir() else None
-                        cur_long_pct_val = round(long_val / total_cap * 100, 1) if total_cap > 0 else None
-                        cur_short_pct_val = round(short_val / total_cap * 100, 1) if total_cap > 0 else None
-
-                        opt_result = run_markowitz_optimization(
-                            long_tickers=opt_long_list, short_tickers=opt_short_list,
-                            prices=opt_prices, rf=opt_rf, total_capital=opt_capital,
-                            max_long_pct=opt_long_pct, max_short_pct=opt_short_pct,
-                            max_per_position=opt_max_pos, min_deploy_pct=opt_min_deploy)
-                    if "error" in opt_result: st.error(opt_result["error"])
-                    else:
-                        opt_result["current"] = {
-                            "return": round(cur_ret, 4), "volatility": round(cur_vol, 4),
-                            "sharpe": round(cur_sh, 4),
-                            "var_95": cur_var95, "cvar_95": cur_cvar95,
-                            "cash": cur_cash,
-                            "long_pct": cur_long_pct_val, "short_pct": cur_short_pct_val,
-                        }
-                        # store optimizer internals for custom targets
-                        opt_result["_internals"] = {
-                            "prices": opt_prices, "rf": opt_rf,
-                            "long_tickers": opt_long_list, "short_tickers": opt_short_list,
-                            "total_capital": opt_capital, "max_long_pct": opt_long_pct,
-                            "max_short_pct": opt_short_pct, "max_per_position": opt_max_pos,
-                            "min_deploy_pct": opt_min_deploy,
-                        }
-                        st.session_state["markowitz_results"] = opt_result
-
-            if "markowitz_results" in st.session_state:
-                mk = st.session_state["markowitz_results"]
-                ms = mk["max_sharpe"]
-                mv = mk["min_variance"]
-                uc = mk["unconstrained"]
-                cur_m = mk["current"]
-                ca = mk["constraint_analysis"]
-
-                # efficient frontier chart
-                st.markdown("**Efficient Frontier**")
-                frontier = mk["frontier"]
-
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=frontier["volatilities"], y=frontier["returns"], mode="markers",
-                    marker=dict(size=3, color=frontier["sharpes"], colorscale="Viridis", showscale=True,
-                                colorbar=dict(title="Sharpe")),
-                    name="Simulated", hovertemplate="Vol: %{x:.2%}<br>Ret: %{y:.2%}"))
-
-                # efficient frontier curve
-                if "frontier_curve" in mk:
-                    fc = mk["frontier_curve"]
-                    fig.add_trace(go.Scatter(x=fc["volatilities"], y=fc["returns"],
-                        mode="lines", line=dict(color="#64ffda", width=2.5, dash="solid"),
-                        name="Efficient Frontier", hovertemplate="Vol: %{x:.2%}<br>Ret: %{y:.2%}"))
-
-                fig.add_trace(go.Scatter(x=[ms["volatility"]], y=[ms["return"]], mode="markers",
-                    marker=dict(size=15, color="red", symbol="star"),
-                    name=f"Max Sharpe ({ms['sharpe']:.2f})"))
-                fig.add_trace(go.Scatter(x=[mv["volatility"]], y=[mv["return"]], mode="markers",
-                    marker=dict(size=15, color="blue", symbol="diamond"),
-                    name=f"Min Variance ({mv['sharpe']:.2f})"))
-                fig.add_trace(go.Scatter(x=[uc["volatility"]], y=[uc["return"]], mode="markers",
-                    marker=dict(size=15, color="green", symbol="triangle-up"),
-                    name=f"Unconstrained ({uc['sharpe']:.2f})"))
-                fig.add_trace(go.Scatter(x=[cur_m["volatility"]], y=[cur_m["return"]], mode="markers",
-                    marker=dict(size=15, color="orange", symbol="x"),
-                    name=f"Current ({cur_m['sharpe']:.2f})"))
-                fig.update_layout(xaxis_title="Annualised Volatility", yaxis_title="Annualised Return",
-                                  xaxis_tickformat=".1%", yaxis_tickformat=".1%",
-                                  height=500, margin=dict(l=40, r=40, t=30, b=40))
-                st.plotly_chart(fig, use_container_width=True)
-
-                # --- Custom Target Allocation ---
-                st.markdown("**Custom Target Allocation**")
-                st.caption("Find the optimal allocation for a specific volatility or return target.")
-                ct1, ct2 = st.columns(2)
-                with ct1:
-                    target_vol = st.number_input("Target Volatility (%)", min_value=1.0, max_value=50.0,
-                        value=round(cur_m["volatility"] * 100, 1), step=0.5, key="target_vol")
-                    find_vol = st.button("Find Max Return", key="find_vol_btn", use_container_width=True)
-                with ct2:
-                    target_ret = st.number_input("Target Return (%)", min_value=-20.0, max_value=200.0,
-                        value=round(cur_m["return"] * 100, 1), step=1.0, key="target_ret")
-                    find_ret = st.button("Find Min Volatility", key="find_ret_btn", use_container_width=True)
-
-                # run custom optimization
-                if (find_vol or find_ret) and "_internals" in mk:
-                    internals = mk["_internals"]
-                    with st.spinner("Finding optimal allocation..."):
-                        if find_vol:
-                            custom_result = _run_custom_target_optimization(
-                                internals, mode="target_vol", target_value=target_vol / 100)
+                    sim_sell_proceeds = 0.0
+                    sim_short_proceeds = 0.0
+                    sim_buy_cost = 0.0
+                    for h in st.session_state["sim_hypothetical"]:
+                        t = h["ticker"]
+                        price = h["avg_buy_price"]
+                        if h["shares"] < 0:
+                            existing_shares = 0
+                            if not portfolio.empty and t in portfolio["ticker"].values:
+                                existing_shares = portfolio.loc[portfolio["ticker"] == t, "shares"].iloc[0]
+                            if existing_shares > 0:
+                                sell_qty = min(abs(h["shares"]), existing_shares)
+                                short_qty = abs(h["shares"]) - sell_qty
+                                sim_sell_proceeds += sell_qty * price
+                                if short_qty > 0:
+                                    sim_short_proceeds += short_qty * price
+                            else:
+                                sim_short_proceeds += abs(h["shares"]) * price
                         else:
-                            custom_result = _run_custom_target_optimization(
-                                internals, mode="target_ret", target_value=target_ret / 100)
+                            sim_buy_cost += h["shares"] * price
 
-                    if custom_result and "error" not in custom_result:
-                        st.session_state["custom_target_result"] = custom_result
-                    elif custom_result:
-                        st.warning(custom_result["error"])
+                    if sim_sell_proceeds > 0:
+                        st.caption(f"Sell Proceeds: **${sim_sell_proceeds:,.2f}** (from closing longs — adds to capital)")
+                    if sim_short_proceeds > 0:
+                        st.caption(f"Short Proceeds: **${sim_short_proceeds:,.2f}** (held as margin — not spendable)")
+                    if sim_buy_cost > 0:
+                        st.caption(f"Buy Cost: **${sim_buy_cost:,.2f}** (from hypothetical buys — subtracts from capital)")
+                    net_capital_change = sim_sell_proceeds - sim_buy_cost
+                    if net_capital_change != 0:
+                        sign = "+" if net_capital_change > 0 else ""
+                        st.caption(f"Net Capital Impact: **{sign}${net_capital_change:,.2f}**")
+                    st.session_state["sim_sell_proceeds"] = sim_sell_proceeds
+                    st.session_state["sim_short_proceeds"] = sim_short_proceeds
+                    st.session_state["sim_buy_cost"] = sim_buy_cost
 
-                if "custom_target_result" in st.session_state:
-                    ctr_result = st.session_state["custom_target_result"]
-                    ctr_c1, ctr_c2, ctr_c3, ctr_c4 = st.columns(4)
-                    ctr_c1.metric("Expected Return", f"{ctr_result['return']*100:.2f}%")
-                    ctr_c2.metric("Volatility", f"{ctr_result['volatility']*100:.2f}%")
-                    ctr_c3.metric("Sharpe Ratio", f"{ctr_result['sharpe']:.4f}")
-                    ctr_c4.metric("Cash Held", f"${ctr_result.get('cash', 0):,.0f}")
-                    if not ctr_result["table"].empty:
-                        tbl_fmt = {"Dollar Amount ($)": "${:,.2f}", "Weight (%)": "{:.2f}"}
-                        st.dataframe(ctr_result["table"].style.format(tbl_fmt),
-                            use_container_width=True, hide_index=True)
+                    rc1, rc2 = st.columns([3, 1])
+                    with rc1:
+                        remove_hypo = st.selectbox("Remove", options=[""] + [h["ticker"] for h in st.session_state["sim_hypothetical"]], key="rm_hypo")
+                    with rc2:
+                        st.write(""); st.write("")
+                        if st.button("Remove", key="rm_btn") and remove_hypo:
+                            st.session_state["sim_hypothetical"] = [h for h in st.session_state["sim_hypothetical"] if h["ticker"] != remove_hypo]
+                            st.rerun()
 
-                # constraint analysis box
-                if ca["is_limiting"]:
-                    st.info(
-                        f"**Constraint Analysis**\n\n"
-                        f"Unconstrained Optimal: **{ca['uc_long_pct']}% Long / {ca['uc_short_pct']}% Short**\n\n"
-                        f"Your Limits: **{ca['constrained_long_pct']}% Long / {ca['constrained_short_pct']}% Short**\n\n"
-                        f"Your constraints are limiting potential returns. "
-                        f"Unconstrained Sharpe: **{ca['uc_sharpe']:.2f}** vs Constrained: **{ca['constrained_sharpe']:.2f}** "
-                        f"(gap: {ca['sharpe_gap']:.4f})")
+            # Step 3 — Run simulation
+            st.divider()
+            s1, s2 = st.columns([2, 1])
+            with s1: sim_lookback = st.selectbox("Lookback", ["1 Year", "3 Years", "5 Years", "10 Years", "15 Years"], index=1, key="sim_lookback")
+            with s2:
+                st.write("")
+                run_sim = st.button("Run Simulation", type="primary", use_container_width=True, key="run_sim_btn")
+
+            if run_sim:
+                if not selected_base and not st.session_state["sim_hypothetical"]:
+                    st.error("Need at least one position.")
                 else:
-                    st.success(
-                        f"**Constraint Analysis**\n\n"
-                        f"Unconstrained Optimal: **{ca['uc_long_pct']}% Long / {ca['uc_short_pct']}% Short**\n\n"
-                        f"Your Limits: **{ca['constrained_long_pct']}% Long / {ca['constrained_short_pct']}% Short**\n\n"
-                        f"Your constraints are not limiting the optimizer.")
+                    base_rows = portfolio[portfolio["ticker"].isin(selected_base)].copy()
+                    hypo_rows = st.session_state["sim_hypothetical"]
 
-                # metrics comparison
-                st.markdown("**Metrics Comparison**")
-                comp = [("Expected Return", "return", "{:.2%}"), ("Volatility", "volatility", "{:.2%}"),
-                        ("Sharpe Ratio", "sharpe", "{:.4f}"), ("VaR (95%)", "var_95", "{:.4%}"),
-                        ("CVaR (95%)", "cvar_95", "{:.4%}"), ("Cash Held", "cash", "${:,.0f}"),
-                        ("Long %", "long_pct", "{:.1f}%"), ("Short %", "short_pct", "{:.1f}%")]
-                mh1, mh2, mh3, mh4, mh5 = st.columns([2, 1.2, 1.2, 1.2, 1.2])
-                mh1.markdown("**Metric**"); mh2.markdown("**Current**"); mh3.markdown("**Max Sharpe**")
-                mh4.markdown("**Min Variance**"); mh5.markdown("**Unconstrained**")
-                st.markdown("---")
-                for label, key, fmt in comp:
-                    mc1, mc2, mc3, mc4, mc5 = st.columns([2, 1.2, 1.2, 1.2, 1.2])
-                    mc1.write(label)
-                    cv = cur_m.get(key); msv = ms.get(key); mvv = mv.get(key); ucv = uc.get(key)
-                    mc2.write(fmt.format(cv) if cv is not None else "N/A")
-                    mc3.write(fmt.format(msv) if msv is not None else "N/A")
-                    mc4.write(fmt.format(mvv) if mvv is not None else "N/A")
-                    mc5.write(fmt.format(ucv) if ucv is not None else "N/A")
+                    sim_dict = {}
+                    for _, row in base_rows.iterrows():
+                        sim_dict[row["ticker"]] = {
+                            "ticker": row["ticker"], "shares": row["shares"],
+                            "avg_buy_price": row["avg_buy_price"],
+                            "date_added": row.get("date_added", "")}
+                    for h in hypo_rows:
+                        t = h["ticker"]
+                        if t in sim_dict:
+                            sim_dict[t]["shares"] += h["shares"]
+                            if abs(sim_dict[t]["shares"]) < 0.0001:
+                                del sim_dict[t]
+                        else:
+                            sim_dict[t] = {"ticker": t, "shares": h["shares"],
+                                "avg_buy_price": h["avg_buy_price"],
+                                "date_added": h.get("date_added", "hypothetical")}
 
-                # allocation tables
+                    sim_portfolio = pd.DataFrame(list(sim_dict.values())) if sim_dict else pd.DataFrame(columns=["ticker", "shares", "avg_buy_price", "date_added"])
+                    with st.spinner("Running simulation..."):
+                        m.LOOKBACK_YEARS = {"1 Year": 1, "3 Years": 3, "5 Years": 5, "10 Years": 10, "15 Years": 15}[sim_lookback]
+                        all_sim_tickers = list(set(portfolio["ticker"].tolist() + sim_portfolio["ticker"].tolist()))
+                        shared_prices = fetch_price_history(all_sim_tickers + ["^GSPC"])
+                        shared_rf = get_risk_free_rate()
+                        current_metrics = run_all_metrics_with_prices(portfolio, shared_prices, shared_rf)
+                        sim_metrics = run_all_metrics_with_prices(sim_portfolio, shared_prices, shared_rf)
+                        cur_ctr = calculate_ctr(shared_prices, portfolio)
+                        sim_ctr = calculate_ctr(shared_prices, sim_portfolio)
+
+                        # correlation with S&P 500
+                        if "^GSPC" in shared_prices.columns:
+                            sp_ret = shared_prices["^GSPC"].pct_change().dropna()
+                            cur_port_ret = compute_portfolio_returns(shared_prices, portfolio)
+                            sim_port_ret = compute_portfolio_returns(shared_prices, sim_portfolio)
+                            if len(cur_port_ret) > 10 and len(sp_ret) > 10:
+                                common_cur = cur_port_ret.index.intersection(sp_ret.index)
+                                current_metrics["S&P 500 Correlation"] = round(float(cur_port_ret.loc[common_cur].corr(sp_ret.loc[common_cur])), 4)
+                            if len(sim_port_ret) > 10 and len(sp_ret) > 10:
+                                common_sim = sim_port_ret.index.intersection(sp_ret.index)
+                                sim_metrics["S&P 500 Correlation"] = round(float(sim_port_ret.loc[common_sim].corr(sp_ret.loc[common_sim])), 4)
+
+                        # correlation matrix for simulated portfolio
+                        sim_corr_matrix = None
+                        sim_tickers_for_corr = sim_portfolio["ticker"].tolist() if not sim_portfolio.empty else []
+                        avail_corr = [t for t in sim_tickers_for_corr if t in shared_prices.columns]
+                        if len(avail_corr) >= 2:
+                            sim_corr_matrix = shared_prices[avail_corr].pct_change().dropna().corr()
+
+                    if "error" in sim_metrics: st.error(sim_metrics["error"])
+                    else:
+                        st.session_state["sim_results"] = {
+                            "current": current_metrics, "simulated": sim_metrics,
+                            "selected_base": selected_base,
+                            "hypothetical": [h["ticker"] for h in st.session_state["sim_hypothetical"]],
+                            "sim_portfolio": sim_portfolio, "cur_ctr": cur_ctr, "sim_ctr": sim_ctr,
+                            "sim_corr_matrix": sim_corr_matrix}
+
+            # --- display results ---
+            if "sim_results" in st.session_state:
+                res = st.session_state["sim_results"]
+                cur, sim = res["current"], res["simulated"]
                 st.divider()
-                all_input_tickers = set(opt_long_list + opt_short_list)
-                def _get_allocated(table):
-                    if table.empty: return set()
-                    return set(table[table["Ticker"] != "CASH"]["Ticker"].tolist())
+                st.markdown("**Results**")
+                ic1, ic2 = st.columns(2)
+                ic1.caption(f"Base: {', '.join(res['selected_base']) or 'None'}")
+                ic2.caption(f"Hypothetical: {', '.join(res['hypothetical']) or 'None'}")
 
-                ms_allocated = _get_allocated(ms["table"])
-                mv_allocated = _get_allocated(mv["table"])
-                uc_allocated = _get_allocated(uc["table"])
-                ms_zeroed = all_input_tickers - ms_allocated
-                mv_zeroed = all_input_tickers - mv_allocated
-                uc_zeroed = all_input_tickers - uc_allocated
-                all_zeroed = ms_zeroed | mv_zeroed | uc_zeroed
-                if all_zeroed:
-                    zeroed_notes = []
-                    for t in sorted(all_zeroed):
-                        scenarios = []
-                        if t in ms_zeroed: scenarios.append("Max Sharpe")
-                        if t in mv_zeroed: scenarios.append("Min Variance")
-                        if t in uc_zeroed: scenarios.append("Unconstrained")
-                        zeroed_notes.append(f"**{t}** → 0% in {', '.join(scenarios)}")
-                    st.warning("Some positions received zero allocation: " + " · ".join(zeroed_notes))
+                metric_defs = [
+                    ("Variance (Daily)", "Variance (Daily)", "{:.6f}", False),
+                    ("Std Dev (Daily)", "Std Dev (Daily)", "{:.6f}", False),
+                    ("Std Dev (Annual)", "Std Dev (Annual)", "{:.2%}", False),
+                    ("Skewness", "Skewness", "{:.4f}", False),
+                    ("Kurtosis", "Kurtosis", "{:.4f}", False),
+                    ("CAGR", "CAGR", "{:.2%}", True),
+                    ("Max Drawdown", "Max Drawdown", "{:.2%}", True),
+                    ("Sharpe Ratio", "Sharpe Ratio", "{:.4f}", True),
+                    ("Sortino Ratio", "Sortino Ratio", "{:.4f}", True),
+                    ("Calmar Ratio", "Calmar Ratio", "{:.4f}", True),
+                    ("VaR (95%)", "VaR (95%)", "{:.4%}", False),
+                    ("CVaR (95%)", "CVaR (95%)", "{:.4%}", False),
+                    ("Beta", "Beta", "{:.4f}", False),
+                    ("Alpha (Annual)", "Alpha (Annual)", "{:.2%}", True),
+                    ("S&P 500 Correlation", "S&P 500 Correlation", "{:.4f}", False),
+                ]
+                h1, h2, h3, h4 = st.columns([2, 1.5, 1.5, 1.5])
+                h1.markdown("**Metric**"); h2.markdown("**Current**"); h3.markdown("**Simulated**"); h4.markdown("**Delta**")
+                st.markdown("---")
+                for label, key, fmt, hb in metric_defs:
+                    cv, sv = cur.get(key), sim.get(key)
+                    r1, r2, r3, r4 = st.columns([2, 1.5, 1.5, 1.5])
+                    r1.write(label)
+                    r2.write(fmt.format(cv) if cv is not None else "N/A")
+                    r3.write(fmt.format(sv) if sv is not None else "N/A")
+                    if cv is not None and sv is not None:
+                        d = sv - cv; p = "+" if d > 0 else ""
+                        c = ("green" if d > 0 else "red") if hb else ("green" if d < 0 else "red")
+                        r4.markdown(f":{c}[{p}{fmt.format(d)}]")
+                    else: r4.write("-")
+                st.caption(f"Risk-free rate: {cur.get('Risk-Free Rate Used', 0)*100:.2f}% | Lookback: {sim_lookback}")
 
-                at1, at2, at3 = st.columns(3)
-                tbl_fmt = {"Dollar Amount ($)": "${:,.2f}", "Weight (%)": "{:.2f}"}
-                with at1:
-                    st.markdown("**Max Sharpe Allocation**")
-                    if not ms["table"].empty:
-                        st.dataframe(ms["table"].style.format(tbl_fmt), use_container_width=True, hide_index=True)
-                with at2:
-                    st.markdown("**Min Variance Allocation**")
-                    if not mv["table"].empty:
-                        st.dataframe(mv["table"].style.format(tbl_fmt), use_container_width=True, hide_index=True)
-                with at3:
-                    st.markdown("**Unconstrained Allocation**")
-                    if not uc["table"].empty:
-                        st.dataframe(uc["table"].style.format(tbl_fmt), use_container_width=True, hide_index=True)
+                st.divider()
+                st.markdown("**Portfolio Comparison**")
+                wl, wr = st.columns(2)
+                with wl:
+                    st.markdown("Current - Weight")
+                    cw = portfolio[portfolio["ticker"].isin(res["selected_base"])].copy()
+                    if not cw.empty: st.bar_chart(cw.set_index("ticker")["shares"].rename("Weight"))
+                with wr:
+                    st.markdown("Simulated - Weight")
+                    sp = res["sim_portfolio"]
+                    if not sp.empty: st.bar_chart(sp.set_index("ticker")["shares"].rename("Weight"))
+
+                cl, cr = st.columns(2)
+                with cl:
+                    st.markdown("Current - CTR")
+                    if not res["cur_ctr"].empty:
+                        st.bar_chart(res["cur_ctr"].set_index("Ticker")["CTR (%)"])
+                with cr:
+                    st.markdown("Simulated - CTR")
+                    if not res["sim_ctr"].empty:
+                        st.bar_chart(res["sim_ctr"].set_index("Ticker")["CTR (%)"])
+
+                # correlation heatmap for simulated portfolio
+                sim_corr = res.get("sim_corr_matrix")
+                if sim_corr is not None:
+                    st.divider()
+                    st.markdown("**Simulated Portfolio — Correlation Matrix**")
+                    mask = np.triu(np.ones_like(sim_corr, dtype=bool), k=1)
+                    avg_corr = sim_corr.values[mask].mean()
+                    st.caption(f"Average pairwise correlation: **{avg_corr:.3f}**")
+                    fig_scorr = go.Figure(data=go.Heatmap(
+                        z=sim_corr.values, x=sim_corr.columns.tolist(), y=sim_corr.index.tolist(),
+                        colorscale=[[0, "#f85149"], [0.5, "#0d1117"], [1, "#3fb950"]],
+                        zmid=0, zmin=-1, zmax=1,
+                        text=sim_corr.round(2).values, texttemplate="%{text}",
+                        textfont=dict(size=10),
+                        hovertemplate="<b>%{x}</b> vs <b>%{y}</b><br>Correlation: %{z:.3f}<extra></extra>",
+                        colorbar=dict(title="ρ"),
+                    ))
+                    fig_scorr.update_layout(
+                        height=max(400, len(sim_corr) * 35),
+                        margin=dict(l=10, r=10, t=10, b=10),
+                        xaxis=dict(side="bottom"),
+                        yaxis=dict(autorange="reversed"),
+                    )
+                    st.plotly_chart(fig_scorr, use_container_width=True)
+
+                st.divider()
+                if st.button("Reset Simulator", key="reset_sim"):
+                    for k in ["sim_results", "sim_hypothetical", "markowitz_results", "custom_target_result"]:
+                        st.session_state.pop(k, None)
+                    st.rerun()
+
+        # ============================================================
+        # SUB-TAB: OPTIMIZATION
+        # ============================================================
+        with sim_sub_optimization:
+
+            selected_base = st.session_state.get("_selected_base", all_tickers)
+
+            sim_port_for_opt = st.session_state.get("sim_results", {}).get("sim_portfolio", None)
+            if sim_port_for_opt is not None and not sim_port_for_opt.empty:
+                opt_ticker_source = sim_port_for_opt["ticker"].tolist()
+            else:
+                _opt_dict = {t: True for t in selected_base}
+                for h in st.session_state.get("sim_hypothetical", []):
+                    t = h["ticker"]
+                    if t in _opt_dict and t in selected_base:
+                        base_shares = portfolio.loc[portfolio["ticker"] == t, "shares"].iloc[0] if t in portfolio["ticker"].values else 0
+                        merged = base_shares + h["shares"]
+                        if abs(merged) < 0.0001:
+                            del _opt_dict[t]
+                    else:
+                        _opt_dict[t] = True
+                opt_ticker_source = list(_opt_dict.keys())
+
+            sim_sell_proceeds = st.session_state.get("sim_sell_proceeds", 0.0)
+            sim_buy_cost = st.session_state.get("sim_buy_cost", 0.0)
+            default_long_pct = 73
+            default_short_pct = 27
+            if not portfolio.empty:
+                tmv = 0; long_val = 0; short_val = 0
+                for t in portfolio["ticker"].tolist():
+                    try:
+                        p = yf.Ticker(t).fast_info.last_price
+                        s = portfolio.loc[portfolio["ticker"] == t, "shares"].iloc[0]
+                        mv = p * s; tmv += mv
+                        if s > 0: long_val += mv
+                        else: short_val += abs(mv)
+                    except: pass
+                cap_result = calculate_current_capital(tmv)
+                default_capital = int(cap_result[0])
+                default_capital += int(sim_sell_proceeds)
+                default_capital -= int(sim_buy_cost)
+                default_capital = max(default_capital, 0)
+                total_cap = default_capital if default_capital > 0 else 1
+                default_long_pct = min(100, round(long_val / total_cap * 100))
+                default_short_pct = min(100, round(short_val / total_cap * 100))
+            else:
+                default_capital = 1_000_000
+
+            if not opt_ticker_source:
+                st.info("No tickers available. Configure holdings in the **Simulation** tab and run the simulation first.")
+            else:
+                st.markdown("**Portfolio Optimization (Markowitz)**")
+                st.caption("Mean-variance optimization. Long/Short % are maximum caps, not targets.")
+
+                opt_c1, opt_c2, opt_c3, opt_c4, opt_c5 = st.columns(5)
+                with opt_c1: opt_capital = st.number_input("Total Capital ($)", value=default_capital, step=10000, key="opt_capital")
+                with opt_c2: opt_long_pct = st.number_input("Max Long %", value=default_long_pct, min_value=0, max_value=100, step=1, key="opt_long_pct")
+                with opt_c3: opt_short_pct = st.number_input("Max Short %", value=default_short_pct, min_value=0, max_value=100, step=1, key="opt_short_pct")
+                with opt_c4: opt_max_pos = st.number_input("Max Per Position ($)", value=90000, step=5000, key="opt_max_pos")
+                with opt_c5: opt_min_deploy = st.number_input("Min Deploy %", value=95, min_value=50, max_value=100, step=1, key="opt_min_deploy")
+
+                if opt_long_pct + opt_short_pct > 100:
+                    st.info(f"Note: Long + Short exposure = {opt_long_pct + opt_short_pct}%. This is expected for long-short portfolios using leverage.")
+
+                all_opt_tickers = list(set(opt_ticker_source))
+
+                st.markdown("**Tag tickers as Long or Short:**")
+                st.caption("Defaults inferred from simulated portfolio positions.")
+                opt_cols = st.columns(min(len(all_opt_tickers), 5))
+                opt_long_list, opt_short_list = [], []
+                for i, t in enumerate(all_opt_tickers):
+                    with opt_cols[i % min(len(all_opt_tickers), 5)]:
+                        default_side = "Long"
+                        if sim_port_for_opt is not None and not sim_port_for_opt.empty and t in sim_port_for_opt["ticker"].values:
+                            if sim_port_for_opt.loc[sim_port_for_opt["ticker"] == t, "shares"].iloc[0] < 0:
+                                default_side = "Short"
+                        elif not portfolio.empty and t in portfolio["ticker"].values:
+                            if portfolio.loc[portfolio["ticker"] == t, "shares"].iloc[0] < 0:
+                                default_side = "Short"
+                        side = st.radio(t, ["Long", "Short"], index=0 if default_side == "Long" else 1,
+                                        key=f"opt_side_{t}", horizontal=True)
+                        if side == "Long": opt_long_list.append(t)
+                        else: opt_short_list.append(t)
+
+                if not opt_long_list: st.warning("Select at least one Long ticker.")
+
+                sim_lookback_opt = st.session_state.get("sim_lookback", "3 Years")
+
+                if st.button("Run Optimization", type="primary", key="run_opt_btn"):
+                    if not opt_long_list:
+                        st.error("Need at least one Long ticker.")
+                    elif len(opt_long_list) + len(opt_short_list) < 2:
+                        st.error("Need at least 2 tickers total.")
+                    else:
+                        with st.spinner("Running Markowitz optimization..."):
+                            opt_yrs = {"1 Year": 1, "3 Years": 3, "5 Years": 5, "10 Years": 10, "15 Years": 15}.get(sim_lookback_opt, 3)
+                            opt_prices = fetch_price_history(opt_long_list + opt_short_list, years=opt_yrs)
+                            opt_rf = get_risk_free_rate()
+                            cur_port_ret = compute_portfolio_returns(opt_prices, portfolio)
+                            cur_ret = float(cur_port_ret.mean() * 252) if len(cur_port_ret) > 0 else 0
+                            cur_vol = float(cur_port_ret.std() * np.sqrt(252)) if len(cur_port_ret) > 0 else 0
+                            cur_sh = (cur_ret - opt_rf) / cur_vol if cur_vol > 0 else 0
+
+                            cur_var95, cur_cvar95 = None, None
+                            if len(cur_port_ret) > 30:
+                                cur_sim_daily = np.random.normal(cur_ret/252, cur_vol/np.sqrt(252), 10000)
+                                cur_var95 = round(float(np.percentile(cur_sim_daily, 5)), 6)
+                                cur_cvar95 = round(float(np.mean(cur_sim_daily[cur_sim_daily <= cur_var95])), 6)
+
+                            cur_cash = cash_balance if 'cash_balance' in dir() else None
+                            cur_long_pct_val = round(long_val / total_cap * 100, 1) if total_cap > 0 else None
+                            cur_short_pct_val = round(short_val / total_cap * 100, 1) if total_cap > 0 else None
+
+                            opt_result = run_markowitz_optimization(
+                                long_tickers=opt_long_list, short_tickers=opt_short_list,
+                                prices=opt_prices, rf=opt_rf, total_capital=opt_capital,
+                                max_long_pct=opt_long_pct, max_short_pct=opt_short_pct,
+                                max_per_position=opt_max_pos, min_deploy_pct=opt_min_deploy)
+                        if "error" in opt_result: st.error(opt_result["error"])
+                        else:
+                            opt_result["current"] = {
+                                "return": round(cur_ret, 4), "volatility": round(cur_vol, 4),
+                                "sharpe": round(cur_sh, 4),
+                                "var_95": cur_var95, "cvar_95": cur_cvar95,
+                                "cash": cur_cash,
+                                "long_pct": cur_long_pct_val, "short_pct": cur_short_pct_val,
+                            }
+                            opt_result["_internals"] = {
+                                "prices": opt_prices, "rf": opt_rf,
+                                "long_tickers": opt_long_list, "short_tickers": opt_short_list,
+                                "total_capital": opt_capital, "max_long_pct": opt_long_pct,
+                                "max_short_pct": opt_short_pct, "max_per_position": opt_max_pos,
+                                "min_deploy_pct": opt_min_deploy,
+                            }
+                            st.session_state["markowitz_results"] = opt_result
+
+                if "markowitz_results" in st.session_state:
+                    mk = st.session_state["markowitz_results"]
+                    ms = mk["max_sharpe"]
+                    mv = mk["min_variance"]
+                    uc = mk["unconstrained"]
+                    cur_m = mk["current"]
+                    ca = mk["constraint_analysis"]
+
+                    # efficient frontier chart
+                    st.markdown("**Efficient Frontier**")
+                    frontier = mk["frontier"]
+
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(x=frontier["volatilities"], y=frontier["returns"], mode="markers",
+                        marker=dict(size=3, color=frontier["sharpes"], colorscale="Viridis", showscale=True,
+                                    colorbar=dict(title="Sharpe")),
+                        name="Simulated", hovertemplate="Vol: %{x:.2%}<br>Ret: %{y:.2%}"))
+
+                    if "frontier_curve" in mk:
+                        fc = mk["frontier_curve"]
+                        fig.add_trace(go.Scatter(x=fc["volatilities"], y=fc["returns"],
+                            mode="lines", line=dict(color="#64ffda", width=2.5, dash="solid"),
+                            name="Efficient Frontier", hovertemplate="Vol: %{x:.2%}<br>Ret: %{y:.2%}"))
+
+                    fig.add_trace(go.Scatter(x=[ms["volatility"]], y=[ms["return"]], mode="markers",
+                        marker=dict(size=15, color="red", symbol="star"),
+                        name=f"Max Sharpe ({ms['sharpe']:.2f})"))
+                    fig.add_trace(go.Scatter(x=[mv["volatility"]], y=[mv["return"]], mode="markers",
+                        marker=dict(size=15, color="blue", symbol="diamond"),
+                        name=f"Min Variance ({mv['sharpe']:.2f})"))
+                    fig.add_trace(go.Scatter(x=[uc["volatility"]], y=[uc["return"]], mode="markers",
+                        marker=dict(size=15, color="green", symbol="triangle-up"),
+                        name=f"Unconstrained ({uc['sharpe']:.2f})"))
+                    fig.add_trace(go.Scatter(x=[cur_m["volatility"]], y=[cur_m["return"]], mode="markers",
+                        marker=dict(size=15, color="orange", symbol="x"),
+                        name=f"Current ({cur_m['sharpe']:.2f})"))
+                    fig.update_layout(xaxis_title="Annualised Volatility", yaxis_title="Annualised Return",
+                                      xaxis_tickformat=".1%", yaxis_tickformat=".1%",
+                                      height=500, margin=dict(l=40, r=40, t=30, b=40))
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    # Custom Target Allocation
+                    st.markdown("**Custom Target Allocation**")
+                    st.caption("Find the optimal allocation for a specific volatility or return target.")
+                    ct1, ct2 = st.columns(2)
+                    with ct1:
+                        target_vol = st.number_input("Target Volatility (%)", min_value=1.0, max_value=50.0,
+                            value=round(cur_m["volatility"] * 100, 1), step=0.5, key="target_vol")
+                        find_vol = st.button("Find Max Return", key="find_vol_btn", use_container_width=True)
+                    with ct2:
+                        target_ret = st.number_input("Target Return (%)", min_value=-20.0, max_value=200.0,
+                            value=round(cur_m["return"] * 100, 1), step=1.0, key="target_ret")
+                        find_ret = st.button("Find Min Volatility", key="find_ret_btn", use_container_width=True)
+
+                    if (find_vol or find_ret) and "_internals" in mk:
+                        internals = mk["_internals"]
+                        with st.spinner("Finding optimal allocation..."):
+                            if find_vol:
+                                custom_result = _run_custom_target_optimization(
+                                    internals, mode="target_vol", target_value=target_vol / 100)
+                            else:
+                                custom_result = _run_custom_target_optimization(
+                                    internals, mode="target_ret", target_value=target_ret / 100)
+                        if custom_result and "error" not in custom_result:
+                            st.session_state["custom_target_result"] = custom_result
+                        elif custom_result:
+                            st.warning(custom_result["error"])
+
+                    if "custom_target_result" in st.session_state:
+                        ctr_result = st.session_state["custom_target_result"]
+                        ctr_c1, ctr_c2, ctr_c3, ctr_c4 = st.columns(4)
+                        ctr_c1.metric("Expected Return", f"{ctr_result['return']*100:.2f}%")
+                        ctr_c2.metric("Volatility", f"{ctr_result['volatility']*100:.2f}%")
+                        ctr_c3.metric("Sharpe Ratio", f"{ctr_result['sharpe']:.4f}")
+                        ctr_c4.metric("Cash Held", f"${ctr_result.get('cash', 0):,.0f}")
+                        if not ctr_result["table"].empty:
+                            tbl_fmt = {"Dollar Amount ($)": "${:,.2f}", "Weight (%)": "{:.2f}"}
+                            st.dataframe(ctr_result["table"].style.format(tbl_fmt),
+                                use_container_width=True, hide_index=True)
+
+                    # constraint analysis
+                    if ca["is_limiting"]:
+                        st.info(
+                            f"**Constraint Analysis**\n\n"
+                            f"Unconstrained Optimal: **{ca['uc_long_pct']}% Long / {ca['uc_short_pct']}% Short**\n\n"
+                            f"Your Limits: **{ca['constrained_long_pct']}% Long / {ca['constrained_short_pct']}% Short**\n\n"
+                            f"Your constraints are limiting potential returns. "
+                            f"Unconstrained Sharpe: **{ca['uc_sharpe']:.2f}** vs Constrained: **{ca['constrained_sharpe']:.2f}** "
+                            f"(gap: {ca['sharpe_gap']:.4f})")
+                    else:
+                        st.success(
+                            f"**Constraint Analysis**\n\n"
+                            f"Unconstrained Optimal: **{ca['uc_long_pct']}% Long / {ca['uc_short_pct']}% Short**\n\n"
+                            f"Your Limits: **{ca['constrained_long_pct']}% Long / {ca['constrained_short_pct']}% Short**\n\n"
+                            f"Your constraints are not limiting the optimizer.")
+
+                    # metrics comparison
+                    st.markdown("**Metrics Comparison**")
+                    comp = [("Expected Return", "return", "{:.2%}"), ("Volatility", "volatility", "{:.2%}"),
+                            ("Sharpe Ratio", "sharpe", "{:.4f}"), ("VaR (95%)", "var_95", "{:.4%}"),
+                            ("CVaR (95%)", "cvar_95", "{:.4%}"), ("Cash Held", "cash", "${:,.0f}"),
+                            ("Long %", "long_pct", "{:.1f}%"), ("Short %", "short_pct", "{:.1f}%")]
+                    mh1, mh2, mh3, mh4, mh5 = st.columns([2, 1.2, 1.2, 1.2, 1.2])
+                    mh1.markdown("**Metric**"); mh2.markdown("**Current**"); mh3.markdown("**Max Sharpe**")
+                    mh4.markdown("**Min Variance**"); mh5.markdown("**Unconstrained**")
+                    st.markdown("---")
+                    for label, key, fmt in comp:
+                        mc1, mc2, mc3, mc4, mc5 = st.columns([2, 1.2, 1.2, 1.2, 1.2])
+                        mc1.write(label)
+                        cv = cur_m.get(key); msv = ms.get(key); mvv = mv.get(key); ucv = uc.get(key)
+                        mc2.write(fmt.format(cv) if cv is not None else "N/A")
+                        mc3.write(fmt.format(msv) if msv is not None else "N/A")
+                        mc4.write(fmt.format(mvv) if mvv is not None else "N/A")
+                        mc5.write(fmt.format(ucv) if ucv is not None else "N/A")
+
+                    # allocation tables
+                    st.divider()
+                    all_input_tickers = set(opt_long_list + opt_short_list)
+                    def _get_allocated(table):
+                        if table.empty: return set()
+                        return set(table[table["Ticker"] != "CASH"]["Ticker"].tolist())
+
+                    ms_allocated = _get_allocated(ms["table"])
+                    mv_allocated = _get_allocated(mv["table"])
+                    uc_allocated = _get_allocated(uc["table"])
+                    ms_zeroed = all_input_tickers - ms_allocated
+                    mv_zeroed = all_input_tickers - mv_allocated
+                    uc_zeroed = all_input_tickers - uc_allocated
+                    all_zeroed = ms_zeroed | mv_zeroed | uc_zeroed
+                    if all_zeroed:
+                        zeroed_notes = []
+                        for t in sorted(all_zeroed):
+                            scenarios = []
+                            if t in ms_zeroed: scenarios.append("Max Sharpe")
+                            if t in mv_zeroed: scenarios.append("Min Variance")
+                            if t in uc_zeroed: scenarios.append("Unconstrained")
+                            zeroed_notes.append(f"**{t}** → 0% in {', '.join(scenarios)}")
+                        st.warning("Some positions received zero allocation: " + " · ".join(zeroed_notes))
+
+                    at1, at2, at3 = st.columns(3)
+                    tbl_fmt = {"Dollar Amount ($)": "${:,.2f}", "Weight (%)": "{:.2f}"}
+                    with at1:
+                        st.markdown("**Max Sharpe Allocation**")
+                        if not ms["table"].empty:
+                            st.dataframe(ms["table"].style.format(tbl_fmt), use_container_width=True, hide_index=True)
+                    with at2:
+                        st.markdown("**Min Variance Allocation**")
+                        if not mv["table"].empty:
+                            st.dataframe(mv["table"].style.format(tbl_fmt), use_container_width=True, hide_index=True)
+                    with at3:
+                        st.markdown("**Unconstrained Allocation**")
+                        if not uc["table"].empty:
+                            st.dataframe(uc["table"].style.format(tbl_fmt), use_container_width=True, hide_index=True)
