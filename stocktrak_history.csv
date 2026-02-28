@@ -1,0 +1,58 @@
+Symbol,TransactionType,CompanyName,Exchange,Quantity,FXRate,Currency,SecurityType,Price,Amount,CreateDate
+ORR,Market - Buy,EA Series Trust - Militia Long/Short Equity ETF,US,2220,1.00,USD,Equities,$39.2000,"-$87,024.0000",02/27/2026 - 10:15
+DBP,Market - Buy,Invesco DB Multi-Sector Commodity Trust - Invesco DB Precious Metals Fund,US,375,1.00,USD,Equities,$126.3200,"-$47,370.0000",02/27/2026 - 10:15
+AEE,Market - Sell,Ameren Corp.,US,-800,1.00,USD,Equities,$112.3100,"$89,848.0000",02/27/2026 - 10:11
+IAG,Market - Sell,Iamgold Corp.,US,-2000,1.00,USD,Equities,$24.1000,"$48,200.0000",02/27/2026 - 10:10
+PBI,Market - Sell,"Pitney Bowes, Inc.",US,-6000,1.00,USD,Equities,$10.2900,"$61,740.0000",02/23/2026 - 10:19
+KTOS,Market - Buy,Kratos Defense & Security Solutions Inc,US,700,1.00,USD,Equities,$102.6500,"-$71,855.0000",02/19/2026 - 14:00
+SLF,Market - Sell,"Sun Life Financial, Inc.",US,-1150,1.00,USD,Equities,$65.0500,"$74,807.5000",02/19/2026 - 13:58
+WMT,Short Proceeds,Walmart Inc,US,315,1.00,USD,Equities,$128.1600,"-$40,543.6500",02/18/2026 - 10:40
+WMT,Market - Cover,Walmart Inc,US,315,1.00,USD,Equities,$128.1600,$173.2500,02/18/2026 - 10:40
+VTV,Market - Buy,"Vanguard Group, Inc. - Vanguard Value ETF",US,200,1.00,USD,Equities,$205.9400,"-$41,188.0000",02/17/2026 - 15:23
+WMT,Short Proceeds,Walmart Inc,US,-315,1.00,USD,Equities,$128.7100,"$40,543.6500",02/17/2026 - 15:15
+ADI,Market - Buy,Analog Devices Inc.,US,115,1.00,USD,Equities,$338.6400,"-$38,943.6000",02/17/2026 - 15:14
+AMZN,Market - Sell,Amazon.com Inc.,US,-90,1.00,USD,Equities,$200.9700,"$18,087.3000",02/17/2026 - 15:12
+APP,Market - Sell,Applovin Corp - Ordinary Shares - Class A,US,-85,1.00,USD,Equities,$380.4000,"$32,334.0000",02/17/2026 - 15:11
+TQQQ,Short Proceeds,ProShares Trust - ProShares UltraPro QQQ 3x Shares,US,-500,1.00,USD,Equities,$48.5300,"$24,265.0000",02/17/2026 - 15:08
+IAG,Market - Buy,Iamgold Corp.,US,2000,1.00,USD,Equities,$20.9400,"-$41,880.0000",02/17/2026 - 15:04
+VTV,Market - Buy,"Vanguard Group, Inc. - Vanguard Value ETF",US,250,1.00,USD,Equities,$206.0200,"-$51,505.0000",02/17/2026 - 15:01
+PBI,Market - Buy,"Pitney Bowes, Inc.",US,6000,1.00,USD,Equities,$10.2100,"-$61,260.0000",02/17/2026 - 14:59
+PYPG,Market - Sell,Themes ETF Trust - Leverage Shares 2X Long PYPL Daily ETF,US,-8500,1.00,USD,Equities,$5.0700,"$43,095.0000",02/17/2026 - 11:20
+COP,Market - Sell,Conoco Phillips,US,-427,1.00,USD,Equities,$108.8300,"$46,470.4100",02/17/2026 - 11:18
+GILD,Market - Sell,"Gilead Sciences, Inc.",US,-566,1.00,USD,Equities,$154.0200,"$87,175.3200",02/17/2026 - 11:17
+IVZ,Dividends,Invesco Ltd,US,3500,1.00,USD,Equities,$0.2100,$735.0000,02/13/2026 - 00:00
+AEE,Market - Buy,Ameren Corp.,US,800,1.00,USD,Equities,$105.8700,"-$84,696.0000",02/11/2026 - 10:29
+SLF,Market - Buy,"Sun Life Financial, Inc.",US,1150,1.00,USD,Equities,$65.0900,"-$74,853.5000",02/11/2026 - 10:27
+APP,Market - Buy,Applovin Corp - Ordinary Shares - Class A,US,170,1.00,USD,Equities,$440.6100,"-$74,903.7000",02/11/2026 - 10:25
+URA,Market - Sell,Global X Funds - Global X Uranium ETF,US,-1600,1.00,USD,Equities,$53.0800,"$84,928.0000",02/11/2026 - 10:10
+AMZN,Market - Buy,Amazon.com Inc.,US,65,1.00,USD,Equities,$222.3100,"-$14,450.1500",02/05/2026 - 14:44
+LVHD,Dividends,Legg Mason ETF Investment Trust - Franklin U.S. Low Volatility High Dividend Index ETF,US,2000,1.00,USD,Equities,$0.0845,$169.0200,02/05/2026 - 00:00
+ALAB,Market - Sell,Astera Labs Inc.,US,-600,1.00,USD,Equities,$142.1100,"$85,266.0000",02/04/2026 - 12:35
+AMD,Market - Sell,Advanced Micro Devices Inc.,US,-297,1.00,USD,Equities,$200.5100,"$59,551.4700",02/04/2026 - 12:35
+PYPG,Market - Buy,Themes ETF Trust - Leverage Shares 2X Long PYPL Daily ETF,US,8500,1.00,USD,Equities,$5.3400,"-$45,390.0000",02/03/2026 - 15:42
+NFLX,Market - Sell,Netflix Inc.,US,-894,1.00,USD,Equities,$79.8800,"$71,412.7200",02/03/2026 - 15:37
+LVHD,Market - Buy,Legg Mason ETF Investment Trust - Franklin U.S. Low Volatility High Dividend Index ETF,US,2000,1.00,USD,Equities,$42.5900,"-$85,180.0000",02/03/2026 - 10:18
+RFIL,Market - Sell,RF Industries Ltd.,US,-9000,1.00,USD,Equities,$10.5200,"$94,680.0000",02/03/2026 - 09:57
+SNDK,Market - Buy,SanDisk Corporation,US,130,1.00,USD,Equities,$669.5000,"-$87,035.0000",02/02/2026 - 12:02
+PM,Market - Sell,Philip Morris International Inc,US,-445,1.00,USD,Equities,$178.3100,"$79,347.9500",02/02/2026 - 12:00
+IVZ,Market - Buy,Invesco Ltd,US,3500,1.00,USD,Equities,$27.7500,"-$97,125.0000",01/30/2026 - 10:06
+SBUX,Market - Sell,Starbucks Corp.,US,-789,1.00,USD,Equities,$91.8800,"$72,493.3200",01/30/2026 - 10:04
+LRCX,Market - Buy,Lam Research Corp.,US,300,1.00,USD,Equities,$248.8700,"-$74,661.0000",01/30/2026 - 09:33
+URA,Market - Buy,Global X Funds - Global X Uranium ETF,US,1600,1.00,USD,Equities,$57.5000,"-$92,000.0000",01/30/2026 - 09:31
+RFIL,Market - Buy,RF Industries Ltd.,US,9000,1.00,USD,Equities,$10.5800,"-$95,220.0000",01/29/2026 - 13:40
+TQQQ,Short Proceeds,ProShares Trust - ProShares UltraPro QQQ 3x Shares,US,-1000,1.00,USD,Equities,$55.2000,"$55,200.0000",01/29/2026 - 13:39
+LVHI,Market - Buy,Legg Mason ETF Investment Trust - Franklin International Low Volatility High Dividend Index ETF,US,2400,1.00,USD,Equities,$38.4800,"-$92,352.0000",01/29/2026 - 13:37
+MSFT,Market - Sell,Microsoft Corporation,US,-165,1.00,USD,Equities,$423.2700,"$69,839.5500",01/29/2026 - 13:34
+TGT,Market - Sell,Target Corp,US,-389,1.00,USD,Equities,$102.7100,"$39,954.1900",01/29/2026 - 13:33
+ALAB,Market - Buy,Astera Labs Inc.,US,600,1.00,USD,Equities,$161.8900,"-$97,134.0000",01/29/2026 - 13:32
+NOW,Market - Sell,ServiceNow Inc,US,-578,1.00,USD,Equities,$113.8000,"$65,776.4000",01/29/2026 - 13:30
+TGT,Market - Buy,Target Corp,US,389,1.00,USD,Equities,$104.2600,"-$40,557.1400",01/26/2026 - 14:20
+COP,Market - Buy,Conoco Phillips,US,427,1.00,USD,Equities,$98.6000,"-$42,102.2000",01/26/2026 - 14:20
+PM,Market - Buy,Philip Morris International Inc,US,445,1.00,USD,Equities,$175.6000,"-$78,142.0000",01/26/2026 - 14:19
+SBUX,Market - Buy,Starbucks Corp.,US,789,1.00,USD,Equities,$96.3400,"-$76,012.2600",01/26/2026 - 14:17
+AMZN,Market - Buy,Amazon.com Inc.,US,322,1.00,USD,Equities,$239.3300,"-$77,064.2600",01/26/2026 - 14:17
+AMD,Market - Buy,Advanced Micro Devices Inc.,US,297,1.00,USD,Equities,$253.0400,"-$75,152.8800",01/26/2026 - 14:16
+NFLX,Market - Buy,Netflix Inc.,US,894,1.00,USD,Equities,$85.8200,"-$76,723.0800",01/26/2026 - 14:16
+MSFT,Market - Buy,Microsoft Corporation,US,165,1.00,USD,Equities,$472.5400,"-$77,969.1000",01/26/2026 - 14:15
+NOW,Market - Buy,ServiceNow Inc,US,578,1.00,USD,Equities,$135.5900,"-$78,371.0200",01/26/2026 - 14:14
+GILD,Market - Buy,"Gilead Sciences, Inc.",US,566,1.00,USD,Equities,$137.3500,"-$77,740.1000",01/26/2026 - 14:13
